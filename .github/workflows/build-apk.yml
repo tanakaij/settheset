@@ -68,9 +68,10 @@ jobs:
           cp settheset.manifest.json www/settheset.manifest.json
           cp -r css www/css
           cp -r js www/js
-          # resources/ holds runtime images AND logo-source.jpg, the 1.4 MB
-          # master artwork that tools/make_icons.py reads at authoring time.
-          # It never reaches a WebView, so it does not belong in the APK.
+          # maxdepth 1 is deliberate. resources/ also holds android/, the
+          # pre-rendered launcher icons, and logo-source.jpg, the master
+          # artwork. Neither ever reaches a WebView, so neither belongs in the
+          # web payload.
           mkdir -p www/resources
           find resources -maxdepth 1 -type f ! -name 'logo-source.jpg' \
             -exec cp {} www/resources/ \;
@@ -125,6 +126,14 @@ jobs:
       # top bar that nobody spots until it is on a phone.
       - name: Match the native status bar to the app
         run: python3 scripts/patch-android-theme.py
+
+      # `cap add android` generates a project carrying Capacitor's own default
+      # launcher icon, so without this the app sits in the drawer under someone
+      # else's logo. Assets are pre-rendered and committed under
+      # resources/android/ -- nothing is rendered here, because a release build
+      # should not be able to fail over an image dependency.
+      - name: Replace the launcher icon
+        run: python3 scripts/patch-android-icons.py
 
       - name: Sync web assets into the Android project
         run: npx cap sync android
