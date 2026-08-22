@@ -1,0 +1,1252 @@
+/* ============================================================
+   Type. Self-hosted, subset to Latin, precached by the service
+   worker — no font CDN, because a network call is exactly what
+   this app cannot rely on. 97 KB for all three.
+
+   Bricolage Grotesque carries titles: it has enough character to
+   look chosen rather than defaulted, and holds up at the weight
+   song titles are set in. JetBrains Mono carries every piece of
+   musical data — the reason for a mono here is that "Ab", "F#m"
+   and "| 1 - 6m |" have to be unmistakable at a glance from the
+   bench, and a proportional face closes those up.
+
+   All three are variable on wght, so one file covers every weight
+   the app uses.
+   ============================================================ */
+@font-face {
+  font-family: 'Bricolage';
+  src: url('../resources/font-display.woff2') format('woff2-variations');
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Instrument';
+  src: url('../resources/font-ui.woff2') format('woff2-variations');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'JetBrainsMono';
+  src: url('../resources/font-data.woff2') format('woff2-variations');
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ============================================================
+   SetTheSet
+   Palette lifted from the supplied UI reference: slate page,
+   near-black chrome, raised slate cards, mint for anything you
+   act on, violet-to-cyan gradient reserved for the one thing
+   that is live right now.
+   Musical data (keys, BPM, patches) is set in mono so "Ab" and
+   "F#m" read instantly from the bench.
+   No web fonts by design: a font CDN is a network call, and
+   this has to work with no signal.
+   ============================================================ */
+:root {
+  --bg:        #303644;
+  --panel:     #1B1C21;
+  --card:      #313747;
+  --card-hi:   #3A4152;
+  --line:      rgba(255,255,255,0.09);
+  --line-firm: rgba(255,255,255,0.16);
+
+  --mint:      #48F8BA;
+  --mint-deep: #01D98C;
+  --cyan:      #27EAFC;
+  --violet:    #6B4FE8;
+
+  --text:      #F2F3F5;
+  --muted:     #999A9E;
+  --alert:     #FF6B72;
+
+  --grad: linear-gradient(100deg, var(--violet) 0%, #3C8CF0 48%, var(--cyan) 100%);
+
+  --font-display: 'Bricolage', ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-ui:      'Instrument', ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-data:    'JetBrainsMono', ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --tap: 52px;          /* generous: this gets tapped mid-song */
+  --pad: 16px;
+  --r:   14px;          /* card radius, from the reference */
+  --r-s: 10px;
+}
+
+* { box-sizing: border-box; }
+
+html {
+  /* Paints the area behind the status bar in standalone mode, and matches
+     <meta name="theme-color">. If these two ever disagree you get a visible
+     band of the wrong colour above the top bar. */
+  background: var(--panel);
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 17px;
+  line-height: 1.45;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior-y: none;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---------------- top bar ---------------- */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px var(--pad);
+  padding-top: calc(10px + env(safe-area-inset-top));
+  padding-left: calc(var(--pad) + env(safe-area-inset-left));
+  padding-right: calc(var(--pad) + env(safe-area-inset-right));
+  background: var(--panel);
+}
+
+.topbar__mark { width: 30px; height: 38px; object-fit: contain; flex: 0 0 auto; }
+
+.topbar__title {
+  font-family: var(--font-display);
+  flex: 1;
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar__back {
+  min-height: 40px;
+  padding: 0 14px;
+  font: inherit;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--card);
+  border: 0;
+  border-radius: var(--r-s);
+  cursor: pointer;
+}
+
+.topbar__nav { display: flex; gap: 6px; }
+
+.tab {
+  min-height: 40px;
+  padding: 0 16px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--card);
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.tab.is-active { background: var(--grad); color: #fff; }
+
+.tab--help {
+  min-width: 40px;
+  padding: 0;
+  font-family: var(--font-data);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.tab--help:active { color: var(--text); }
+
+/* ---------------- help + welcome copy ---------------- */
+.help { font-size: 15.5px; line-height: 1.55; }
+.help h3 {
+  margin: 18px 0 5px;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--mint);
+}
+.help h3:first-child { margin-top: 0; }
+.help p { margin: 0 0 4px; color: var(--text); }
+.help strong { font-weight: 700; }
+
+.help code {
+  font-family: var(--font-data);
+  font-size: 13.5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--mint);
+}
+
+.help + .btn--danger { margin-top: 22px; }
+
+/* ---------------- views ---------------- */
+.view { display: none; }
+.view.is-active { display: block; }
+
+.stack {
+  padding: var(--pad);
+  padding-left: calc(var(--pad) + env(safe-area-inset-left));
+  padding-right: calc(var(--pad) + env(safe-area-inset-right));
+  padding-bottom: calc(48px + env(safe-area-inset-bottom));
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.row { display: flex; gap: 10px; margin: 14px 0; }
+.row--split > * { flex: 1; }
+
+/* ---------------- buttons ---------------- */
+.btn {
+  min-height: var(--tap);
+  padding: 0 18px;
+  font: inherit;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+  cursor: pointer;
+}
+
+/* mint = "this does the thing", exactly as the reference uses it */
+.btn--primary { background: var(--mint); color: #10231C; border-color: var(--mint); }
+.btn--ghost   { background: var(--card); }
+.btn--block   { width: 100%; }
+.btn--live    { background: var(--grad); color: #fff; border-color: transparent; }
+.btn--tiny    { min-height: 38px; padding: 0 14px; font-size: 14px; border-radius: 999px; }
+.btn--ondark  { background: rgba(255,255,255,0.12); color: #fff; border-color: transparent; }
+.btn--danger  { color: var(--alert); background: var(--card); border-color: var(--line); }
+
+.btn:active { transform: translateY(1px); }
+
+:focus-visible { outline: 3px solid var(--mint); outline-offset: 2px; }
+
+/* ---------------- key chip (recurring motif) ---------------- */
+.key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3.6ch;
+  padding: 4px 9px;
+  font-family: var(--font-data);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  color: #10231C;
+  background: var(--mint);
+  border-radius: 6px;
+}
+
+.key--empty { color: var(--muted); background: var(--card-hi); }
+
+/* ---------------- cards ---------------- */
+.cards { list-style: none; margin: 14px 0 0; padding: 0; }
+
+.card {
+  background: var(--card);
+  border-radius: var(--r);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.card__main {
+  display: block;
+  width: 100%;
+  padding: 15px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.card__date {
+  font-family: var(--font-data);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mint);
+  font-weight: 700;
+}
+
+.card__title {
+  font-family: var(--font-display); font-size: 19px; font-weight: 800; margin: 3px 0 0; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+
+.card__sub { font-family: var(--font-data); font-size: 13px; color: var(--muted); margin-top: 4px; }
+
+.card__acts { display: flex; gap: 8px; padding: 0 15px 14px; }
+.card__acts .btn { flex: 1; min-height: 42px; font-size: 14px; background: var(--card-hi); }
+
+/* ---------------- service meta ---------------- */
+.setmeta {
+  background: var(--grad);
+  border-radius: var(--r);
+  padding: 18px;
+}
+
+.setmeta__date {
+  font-family: var(--font-data);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.88);
+  font-weight: 700;
+}
+
+.setmeta__title {
+  font-family: var(--font-display); margin: 5px 0 0; font-size: 25px; font-weight: 800; letter-spacing: -0.02em; color: #fff; }
+.setmeta__note { margin: 8px 0 0; font-size: 15px; color: rgba(255,255,255,0.9); }
+
+/* ---------------- setlist items ---------------- */
+.items { list-style: none; margin: 0; padding: 0; }
+
+.item {
+  background: var(--card);
+  border-radius: var(--r);
+  margin-bottom: 12px;
+  padding: 14px 15px;
+}
+
+.item__seg {
+  font-family: var(--font-data);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mint);
+  font-weight: 700;
+}
+
+.item__head { display: flex; align-items: baseline; gap: 10px; }
+
+.item__no {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--muted);
+  min-width: 2.2ch;
+}
+
+.item__title {
+  font-family: var(--font-display);
+  flex: 1 1 auto;
+  min-width: 0;              /* without this a long title refuses to wrap */
+  overflow-wrap: anywhere;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.item__artist { font-size: 14px; color: var(--muted); margin: 2px 0 0 calc(2.2ch + 10px); }
+
+.item__data {
+  margin: 8px 0 0 calc(2.2ch + 10px);
+  font-family: var(--font-data);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.item__data span + span::before { content: " · "; }
+
+.item__roles { margin: 10px 0 0 calc(2.2ch + 10px); display: flex; flex-wrap: wrap; gap: 6px; }
+
+.role {
+  font-family: var(--font-data);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--card-hi);
+  color: var(--text);
+}
+
+.role b { color: var(--mint); font-weight: 700; }
+
+/* Four controls on a 320px screen. flex-wrap is the safety net: with a large
+   system font they drop to a second line instead of overflowing sideways. */
+.item__acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 13px; }
+
+.item__acts .btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 12px;
+  font-size: 14px;
+  background: var(--card-hi);
+  border-color: transparent;
+}
+
+.item__acts .btn--move { flex: 0 0 46px; padding: 0; font-size: 17px; }
+
+/* ---------------- inputs ---------------- */
+.search { display: block; margin-top: 12px; }
+
+input, select, textarea {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 12px 14px;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+}
+
+input::placeholder, textarea::placeholder { color: var(--muted); }
+textarea { min-height: 96px; resize: vertical; line-height: 1.4; }
+
+select {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+                    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 19px) 50%, calc(100% - 13px) 50%;
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  padding-right: 38px;
+}
+
+.empty { color: var(--muted); font-size: 15px; margin: 16px 0; }
+
+/* First-run states. A bare "nothing here yet" tells you the app works but not
+   what to do with it; this is the one screen where a sentence of guidance is
+   worth more than restraint. */
+.empty--first {
+  text-align: center;
+  padding: 34px 20px;
+  border: 1px dashed var(--line-firm);
+  border-radius: var(--r);
+  margin-top: 18px;
+}
+
+.empty__mark { opacity: 0.75; margin-bottom: 12px; }
+
+.empty--first h2 {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.empty--first p { margin: 0; font-size: 15px; line-height: 1.5; }
+.empty--first strong { color: var(--mint); font-weight: 700; }
+.hint  { color: var(--muted); font-size: 14px; margin-top: 14px; }
+
+/* ---------------- modal (bottom sheet) ---------------- */
+.modal { position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-end; }
+.modal__scrim { position: absolute; inset: 0; background: rgba(10,11,14,0.66); }
+
+/* Deliberately not dismiss-on-scrim-tap: hands are busy at the keys and a
+   stray tap that wipes a half-typed arrangement is worse than one extra tap. */
+.modal__sheet {
+  position: relative;
+  width: 100%;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-radius: 20px 20px 0 0;
+  box-shadow: 0 -8px 40px rgba(0,0,0,0.55);
+  animation: rise 160ms ease-out;
+}
+
+@keyframes rise { from { transform: translateY(18px); opacity: 0.4; } to { transform: none; opacity: 1; } }
+
+.modal__head { padding: 16px var(--pad) 10px; border-bottom: 1px solid var(--line); }
+.modal__head::before {
+  content: "";
+  display: block;
+  width: 40px; height: 4px;
+  margin: -6px auto 12px;
+  border-radius: 999px;
+  background: var(--line-firm);
+}
+
+.modal__title {
+  font-family: var(--font-display); margin: 0; font-size: 19px; font-weight: 800; }
+.modal__body {
+  padding: var(--pad);
+  padding-left: calc(var(--pad) + env(safe-area-inset-left));
+  padding-right: calc(var(--pad) + env(safe-area-inset-right));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;   /* stops the page behind scrolling with it */
+}
+
+.modal__foot {
+  display: flex;
+  gap: 10px;
+  padding: 12px var(--pad);
+  padding-left: calc(var(--pad) + env(safe-area-inset-left));
+  padding-right: calc(var(--pad) + env(safe-area-inset-right));
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.modal__foot .btn { flex: 1; }
+.modal__foot .btn--primary { flex: 2; }
+
+.field { display: block; margin-bottom: 14px; }
+
+.field__label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.field__pair { display: flex; gap: 10px; }
+.field__pair > * { flex: 1; }
+
+.rolerow { display: flex; gap: 8px; margin-bottom: 8px; }
+.rolerow select { flex: 1.1; }
+.rolerow input { flex: 1.4; }
+
+.rolerow button {
+  flex: 0 0 46px;
+  min-height: var(--tap);
+  font: inherit;
+  color: var(--alert);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+  cursor: pointer;
+}
+
+/* ---------------- live mode ---------------- */
+.view--live.is-active { display: block; }
+
+.live {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--panel);
+  padding-bottom: calc(32px + env(safe-area-inset-bottom));
+}
+
+.live__bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px var(--pad);
+  padding-top: calc(10px + env(safe-area-inset-top));
+  padding-left: calc(var(--pad) + env(safe-area-inset-left));
+  padding-right: calc(var(--pad) + env(safe-area-inset-right));
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.live__progress {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: var(--mint);
+}
+
+.livelist {
+  list-style: none;
+  margin: 0;
+  padding: var(--pad);
+  padding-left: calc(var(--pad) + env(safe-area-inset-left));
+  padding-right: calc(var(--pad) + env(safe-area-inset-right));
+}
+
+.lcard {
+  background: var(--card);
+  border-radius: var(--r);
+  margin-bottom: 12px;
+  padding: 16px;
+}
+
+/* the gradient is spent here and nowhere else in live mode: it marks the
+   one song that is happening right now */
+.lcard--now {
+  background: var(--card);
+  padding: 14px;
+  border: 2px solid transparent;
+  background-image: linear-gradient(var(--card), var(--card)), var(--grad);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+}
+
+.lcard--done { opacity: 0.42; }
+.lcard--done .lcard__title {
+  font-family: var(--font-display); text-decoration: line-through; }
+
+.lcard__seg {
+  font-family: var(--font-data);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--mint);
+  font-weight: 700;
+}
+
+.lcard__title { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; margin: 3px 0 0; overflow-wrap: anywhere; }
+.lcard__artist { font-size: 14px; color: var(--muted); }
+
+/* the moment the whole app is built around: key readable from the bench */
+.lcard__key {
+  display: block;
+  font-family: var(--font-data);
+  font-weight: 800;
+  font-size: 76px;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--mint);
+  margin: 12px 0 2px;
+}
+
+.lcard--now .lcard__key { font-size: clamp(76px, 26vw, 132px); }
+
+.lcard__keylabel {
+  font-family: var(--font-data);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.lcard__line { font-family: var(--font-data); font-size: 14px; color: var(--muted); margin-top: 8px; }
+
+.lcard__arr {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 16px;
+  white-space: pre-wrap;
+}
+
+.lcard__roles { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.lcard__roles .role { background: var(--card-hi); }
+
+.lcard__tick {
+  width: 100%;
+  min-height: 60px;
+  margin-top: 16px;
+  font: inherit;
+  font-size: 17px;
+  font-weight: 800;
+  color: #10231C;
+  background: var(--mint);
+  border: 0;
+  border-radius: var(--r-s);
+  cursor: pointer;
+}
+
+.lcard--done .lcard__tick {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--line-firm);
+}
+
+.empty--live { color: var(--muted); padding: 0 var(--pad); }
+
+
+/* ---------------- running time ---------------- */
+.setmeta {
+  display: block;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  color: #fff;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.setmeta:active { filter: brightness(0.94); }
+
+.setmeta__run {
+  margin-top: 6px;
+  font-family: var(--font-data);
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.92);
+}
+
+.item__clock,
+.lcard__clock {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+  min-width: 5.2ch;
+}
+
+.lcard__clock { color: var(--mint); }
+
+/* ---------------- non-song elements ---------------- */
+/* Elements are structurally different from songs, so they read differently:
+   no key chip, no mint accent, a rule down the left instead. */
+.item--element {
+  background: transparent;
+  border: 1px dashed var(--line-firm);
+}
+
+.item--element .item__title { font-weight: 700; color: var(--muted); }
+.item__seg--el { color: var(--muted); }
+.item__note { margin: 8px 0 0 5.2ch; font-size: 15px; white-space: pre-wrap; }
+
+.lcard--element { background: transparent; border: 1px dashed var(--line-firm); }
+.lcard--element .lcard__title { color: var(--muted); font-size: 19px; }
+
+/* ---------------- chord charts ---------------- */
+.chart { margin: 10px 0 0 5.2ch; }
+.chart--compact { margin-top: 8px; }
+
+.chart pre {
+  margin: 0;
+  max-width: 100%;
+  font-family: var(--font-data);
+  font-size: 13.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* numbers are what you typed; names are derived from this Sunday's key */
+.chart__nums  { color: var(--muted); }
+.chart__names { color: var(--mint); margin-top: 2px !important; }
+
+.lcard .chart { margin-left: 0; margin-top: 12px; }
+.lcard .chart pre { font-size: 15px; }
+
+/* ---------------- sheet view pills ---------------- */
+.sheetviews {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  margin-bottom: 12px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.pill {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 0 16px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pill.is-active { background: var(--mint); color: #10231C; border-color: var(--mint); }
+
+
+
+/* ============================================================
+   MOTION
+   Screens that cut read as cheap; screens that move read as
+   built. Everything here is short (160-220ms) and eased out —
+   long enough to register, short enough that it never stands
+   between you and the next tap. All of it collapses under
+   prefers-reduced-motion at the bottom of this file.
+   ============================================================ */
+@keyframes paneIn {
+  from { opacity: 0; transform: translate3d(14px, 0, 0); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes paneBack {
+  from { opacity: 0; transform: translate3d(-14px, 0, 0); }
+  to   { opacity: 1; transform: none; }
+}
+
+.view.anim-in   { animation: paneIn 200ms cubic-bezier(0.22, 0.8, 0.3, 1) both; }
+.view.anim-back { animation: paneBack 200ms cubic-bezier(0.22, 0.8, 0.3, 1) both; }
+
+/* Buttons settle rather than snap. */
+.btn, .tab, .pill, .lcard__tick, .clickbtn, .card__main, .topbar__back {
+  transition: transform 120ms cubic-bezier(0.22, 0.8, 0.3, 1),
+              background-color 160ms ease,
+              opacity 160ms ease;
+}
+
+.btn:active, .tab:active, .pill:active, .topbar__back:active { transform: scale(0.97); }
+.lcard__tick:active, .clickbtn:active { transform: scale(0.985); }
+.card__main:active { transform: scale(0.99); }
+
+/* Cards arrive in sequence rather than all at once. Capped at eight so a long
+   service does not turn into a slow cascade. */
+@keyframes riseIn {
+  from { opacity: 0; transform: translate3d(0, 8px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+
+.items .item,
+.cards .card,
+.livelist .lcard {
+  animation: riseIn 220ms cubic-bezier(0.22, 0.8, 0.3, 1) both;
+}
+
+.items .item:nth-child(1), .cards .card:nth-child(1), .livelist .lcard:nth-child(1) { animation-delay: 0ms; }
+.items .item:nth-child(2), .cards .card:nth-child(2), .livelist .lcard:nth-child(2) { animation-delay: 26ms; }
+.items .item:nth-child(3), .cards .card:nth-child(3), .livelist .lcard:nth-child(3) { animation-delay: 52ms; }
+.items .item:nth-child(4), .cards .card:nth-child(4), .livelist .lcard:nth-child(4) { animation-delay: 78ms; }
+.items .item:nth-child(5), .cards .card:nth-child(5), .livelist .lcard:nth-child(5) { animation-delay: 104ms; }
+.items .item:nth-child(6), .cards .card:nth-child(6), .livelist .lcard:nth-child(6) { animation-delay: 130ms; }
+.items .item:nth-child(7), .cards .card:nth-child(7), .livelist .lcard:nth-child(7) { animation-delay: 156ms; }
+.items .item:nth-child(n+8), .cards .card:nth-child(n+8), .livelist .lcard:nth-child(n+8) { animation-delay: 182ms; }
+
+/* The scrim fades; the sheet rises. Previously the scrim appeared instantly,
+   which made the sheet look like it was catching up with it. */
+.modal__scrim { animation: scrimIn 180ms ease both; }
+@keyframes scrimIn { from { opacity: 0; } to { opacity: 1; } }
+
+.toast { animation: toastIn 220ms cubic-bezier(0.22, 0.8, 0.3, 1) both; }
+@keyframes toastIn {
+  from { opacity: 0; transform: translate(-50%, 14px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* The current song pulses very slightly, so your eye finds it on a glance
+   down mid-song without anything flashing at you. */
+@keyframes nowBreathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(72, 248, 186, 0.0); }
+  50%      { box-shadow: 0 0 0 3px rgba(72, 248, 186, 0.13); }
+}
+
+.lcard--now { animation: riseIn 220ms cubic-bezier(0.22, 0.8, 0.3, 1) both,
+                         nowBreathe 3.4s ease-in-out 400ms infinite; }
+
+/* ============================================================
+   METRONOME
+   ============================================================ */
+.lcard__tools { margin-top: 14px; }
+
+.clickbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 16px;
+  font: inherit;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--text);
+  background: var(--card-hi);
+  border: 1px solid var(--line-firm);
+  border-radius: var(--r-s);
+  cursor: pointer;
+}
+
+.clickbtn.is-on { background: var(--mint); color: #10231C; border-color: var(--mint); }
+
+.clickbtn__label { font-family: var(--font-data); letter-spacing: 0.04em; }
+
+.clickbtn__dots { display: flex; gap: 6px; align-items: center; }
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--line-firm);
+  transition: transform 90ms ease, background-color 90ms ease;
+}
+
+.dot--accent { width: 12px; height: 12px; }
+
+.clickbtn.is-on .dot { background: rgba(16,35,28,0.28); }
+
+.clickbtn.is-on .dot.is-lit {
+  background: #10231C;
+  transform: scale(1.45);
+}
+
+/* ---------------- toast + update ---------------- */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 80;
+  padding: 12px 20px;
+  background: var(--mint);
+  color: #10231C;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 700;
+  max-width: 88vw;
+}
+
+.update {
+  position: fixed;
+  left: var(--pad); right: var(--pad);
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  z-index: 70;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 14px;
+  background: var(--card);
+  border: 1px solid var(--line-firm);
+  border-radius: var(--r-s);
+  font-size: 15px;
+}
+
+.update .btn { background: var(--mint); color: #10231C; border-color: var(--mint); }
+
+/* ============================================================
+   THE SHEET
+   The only artefact anyone else holds. Everything above is for
+   one person on a bench; this goes in five other pairs of hands,
+   so it is set like a document rather than a screen dump: a
+   masthead, a left rail carrying clock and number, generous
+   leading, and one summary line an MD can read at a glance.
+   ============================================================ */
+.sheetwrap {
+  padding: var(--pad);
+  padding-left: calc(var(--pad) + env(safe-area-inset-left));
+  padding-right: calc(var(--pad) + env(safe-area-inset-right));
+  max-width: 780px;
+  margin: 0 auto;
+}
+
+.sheet {
+  background: #fff;
+  color: #14161A;
+  border-radius: var(--r);
+  padding: 30px 28px 24px;
+  box-shadow: 0 18px 48px rgba(0,0,0,0.34);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+/* ---- masthead ---- */
+.sheet__masthead {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding-bottom: 14px;
+  border-bottom: 2.5px solid #14161A;
+}
+
+.sheet__mark {
+  /* Explicit dimensions, not just the width/height attributes: a print engine
+     that mishandles flex sizing will otherwise blow this up to full width. */
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
+  margin-top: 2px;
+  filter: grayscale(1) contrast(1.6) brightness(0.5);
+}
+
+.sheet__id { flex: 1; min-width: 0; }
+
+.sheet__eyebrow {
+  font-family: var(--font-data);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #55606B;
+  white-space: nowrap;
+}
+
+.sheet h2 {
+  margin: 3px 0 0;
+  font-family: var(--font-display);
+  font-size: 27px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+}
+
+.sheet__for {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #fff;
+  background: #14161A;
+  border-radius: 3px;
+  padding: 5px 9px;
+  white-space: nowrap;
+}
+
+/* ---- summary strip ---- */
+.sheet__strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 20px;
+  padding: 11px 0;
+  border-bottom: 1px solid #C9CFD5;
+}
+
+.sheet__stat {
+  font-family: var(--font-data);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #55606B;
+}
+
+.sheet__stat b {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0;
+  color: #14161A;
+  margin-right: 3px;
+}
+
+/* the harmonic journey of the whole service, in one line */
+.sheet__journey {
+  margin-left: auto;
+  font-family: var(--font-data);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.sheet__note {
+  margin: 12px 0 0;
+  font-size: 14.5px;
+  font-style: italic;
+  color: #3B444D;
+}
+
+/* ---- rows ---- */
+.srow {
+  display: grid;
+  grid-template-columns: 62px 1fr;
+  gap: 0 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid #DFE3E7;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+@supports not (display: grid) {
+  .srow__rail { display: flex; gap: 8px; margin-bottom: 4px; }
+}
+
+.srow__rail { text-align: right; }
+
+.srow__clock {
+  display: block;
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.srow__no {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  font-weight: 700;
+  color: #9AA3AC;
+}
+
+.srow__main { min-width: 0; }
+
+.srow__head { display: flex; align-items: baseline; gap: 10px; }
+
+.srow__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+}
+
+.srow__mins {
+  font-family: var(--font-data);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #6B747C;
+  white-space: nowrap;
+}
+
+/* reversed chip, not an outline: the key is the thing the eye hunts for */
+.srow__key {
+  font-family: var(--font-data);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #fff;
+  background: #14161A;
+  border-radius: 3px;
+  padding: 2px 8px;
+  min-width: 3.4ch;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.srow__by { margin-top: 2px; font-size: 14px; color: #4A545D; }
+
+.srow__meta,
+.srow__seg {
+  margin-top: 5px;
+  font-family: var(--font-data);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  color: #55606B;
+}
+
+.srow__first { margin: 7px 0 0; font-size: 14px; font-style: italic; color: #3B444D; }
+
+.srow__detail { margin: 7px 0 0; font-size: 14px; white-space: pre-wrap; }
+
+/* the chart reads as a block, not as more prose */
+.srow__chart {
+  margin-top: 9px;
+  padding: 9px 12px;
+  background: #F1F3F5;
+  border-left: 3px solid #14161A;
+  border-radius: 0 3px 3px 0;
+}
+
+.srow__chart pre {
+  margin: 0;
+  font-family: var(--font-data);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  max-width: 100%;
+}
+
+.srow__names { font-weight: 700; }
+.srow__nums  { color: #79838C; margin-top: 3px !important; }
+
+/* roles as label/value pairs rather than a pipe-separated smear */
+.srow__roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 9px 0 0;
+}
+
+.srow__roles div { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+
+.srow__roles dt {
+  font-family: var(--font-data);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #79838C;
+  white-space: nowrap;
+}
+
+.srow__roles dd { margin: 0; font-size: 13.5px; font-weight: 600; }
+
+.srow__ref {
+  margin-top: 7px;
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: #79838C;
+  word-break: break-all;
+}
+
+/* elements sit back: they are structure, not repertoire */
+.srow--el { background: #F4F6F7; }
+.srow--el .srow__title { font-family: var(--font-ui); font-size: 15.5px; font-weight: 600; font-style: italic; }
+
+.sheet__runner {
+  margin-top: 14px;
+  padding-top: 9px;
+  border-top: 2.5px solid #14161A;
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #55606B;
+}
+
+@media print {
+  @page { margin: 13mm; }
+
+  body { background: #fff; color: #000; font-size: 10.5pt; }
+  /* without this the tinted element rows and chart panels print white */
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  .topbar, .noprint, .modal, .toast, .update { display: none !important; }
+  .view { display: none !important; }
+  #view-sheet.is-active { display: block !important; }
+
+  .sheetwrap { padding: 0; max-width: none; }
+  .sheet { border-radius: 0; padding: 0 0 16mm; box-shadow: none; font-size: 10.5pt; }
+
+  .sheet h2 { font-size: 20pt; }
+  .srow { grid-template-columns: 54px 1fr; padding: 10px 0; }
+  .srow__title { font-size: 12.5pt; }
+
+  /* A fixed footer repeats on every printed page, so page two of a long
+     service still says whose sheet it is and which Sunday. */
+  .sheet__runner {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    margin: 0;
+    background: #fff;
+    padding-top: 6px;
+  }
+}
+
+}
+
+@media (max-width: 360px) {
+  :root { --pad: 12px; }
+  .chart { margin-left: 0; }
+  .item__data, .item__artist, .item__roles, .item__note { margin-left: 0; }
+  .tab { padding: 0 12px; font-size: 14px; }
+}
+
+@media (min-width: 720px) {
+  .lcard__key { font-size: 96px; }
+  .lcard--now .lcard__key { font-size: 140px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  .btn:active, .tab:active, .pill:active,
+  .lcard__tick:active, .clickbtn:active, .card__main:active,
+  .topbar__back:active { transform: none; }
+  /* animation-fill-mode both would otherwise leave these invisible */
+  .view, .items .item, .cards .card, .livelist .lcard,
+  .modal__scrim, .toast { opacity: 1; transform: none; }
+}

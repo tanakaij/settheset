@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="SetTheSet">
+  <!--
+    Redrawn from the supplied artwork as clean vector paths.
+
+    The original is a JPEG of line art on white; cutting it out left a soft glow
+    and compression fringing that went to mush at 192px. This is the same mark —
+    treble clef loop, cross through the upper stem, note head, sweeping lower
+    bowl — built from real geometry so it stays crisp at every size.
+
+    Everything is stroked, not filled, with one shared stroke width, which is
+    what gives the original its single-continuous-line quality.
+
+    NOTE: the gradient MUST be userSpaceOnUse. The default (objectBoundingBox)
+    resolves to nothing on a perfectly straight line, because its bounding box
+    has zero width — so the stem and the cross bar silently disappear.
+  -->
+  <defs>
+    <linearGradient id="ink" gradientUnits="userSpaceOnUse"
+                    x1="150" y1="96" x2="366" y2="470">
+      <stop offset="0"    stop-color="#E4F0FB"/>
+      <stop offset="0.38" stop-color="#B9D5F2"/>
+      <stop offset="0.68" stop-color="#F3DEB2"/>
+      <stop offset="1"    stop-color="#E3C079"/>
+    </linearGradient>
+  </defs>
+
+  <g fill="none" stroke="url(#ink)" stroke-width="15"
+     stroke-linecap="round" stroke-linejoin="round">
+
+    <!-- the stem, running the full height and ending at the note head -->
+    <path d="M256 112 L 256 380"/>
+
+    <!-- pointed leaf at the top of the clef -->
+    <path d="M256 112
+             C 296 158, 300 214, 266 262
+             C 236 214, 234 156, 256 112"/>
+
+    <!-- crescent sweeping down the left -->
+    <path d="M238 152
+             C 190 186, 174 242, 200 280
+             C 215 302, 236 311, 254 312"/>
+
+    <!-- cross through the upper stem -->
+    <path d="M222 210 L 342 210"/>
+    <path d="M316 168 L 316 264"/>
+
+    <!-- lower bowl -->
+    <circle cx="256" cy="382" r="86"/>
+
+    <!-- note head, tilted the way a written one sits -->
+    <ellipse cx="238" cy="386" rx="35" ry="26"
+             transform="rotate(-22 238 386)"/>
+  </g>
+</svg>

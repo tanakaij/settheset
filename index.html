@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SetTheSet</title>
+<meta name="description" content="Setlist planning for gospel musicians. Keys, arrangements, roles. Works offline.">
+
+<link rel="manifest" href="settheset.manifest.json">
+<link rel="icon" href="resources/favicon-128.png">
+<link rel="apple-touch-icon" href="resources/apple-touch-icon-180.png">
+<meta name="theme-color" content="#1B1C21">
+<meta name="color-scheme" content="dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<header class="topbar" id="topbar">
+  <button class="topbar__back" id="btnBack" type="button" hidden>Back</button>
+  <img class="topbar__mark" id="topMark" src="resources/mark.png" alt="" width="30" height="38">
+  <h1 class="topbar__title" id="topTitle">SetTheSet</h1>
+  <nav class="topbar__nav" id="topNav">
+    <button class="tab is-active" data-view="sets" type="button">Sets</button>
+    <button class="tab" data-view="songs" type="button">Songs</button>
+    <button class="tab tab--help" id="btnHelp" type="button" aria-label="How this works">?</button>
+  </nav>
+</header>
+
+<!-- ============ SERVICES ============ -->
+<section class="view is-active" id="view-sets">
+  <div class="stack">
+    <button class="btn btn--primary btn--block" id="btnNewSet" type="button">New service</button>
+    <ul class="cards" id="setList"></ul>
+    <div class="empty empty--first" id="setsEmpty">
+      <img src="resources/mark.svg" alt="" width="64" height="64" class="empty__mark">
+      <h2>Nothing scheduled yet</h2>
+      <p>Start with next Sunday. Add the songs, set the keys, and print a sheet
+         for the team — or hit <strong>Run service</strong> on the morning and
+         work down it from the bench.</p>
+    </div>
+    <div class="row row--split">
+      <button class="btn btn--ghost" id="btnBackup" type="button">Back up</button>
+      <button class="btn btn--ghost" id="btnRestore" type="button">Restore</button>
+    </div>
+    <input id="restoreFile" type="file" accept="application/json" hidden>
+  </div>
+</section>
+
+<!-- ============ SONG LIBRARY ============ -->
+<section class="view" id="view-songs">
+  <div class="stack">
+    <button class="btn btn--primary btn--block" id="btnNewSong" type="button">Add song to library</button>
+    <label class="search">
+      <span class="sr">Search songs</span>
+      <input id="songSearch" type="search" placeholder="Search title or artist">
+    </label>
+    <ul class="cards" id="songList"></ul>
+    <div class="empty empty--first" id="songsEmpty">
+      <img src="resources/mark.svg" alt="" width="64" height="64" class="empty__mark">
+      <h2>Your library is empty</h2>
+      <p>Songs you add to a service land here automatically. After a few weeks
+         you'll mostly be picking from this list and adjusting keys.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SET EDITOR ============ -->
+<section class="view" id="view-editor">
+  <div class="stack">
+    <div class="setmeta" id="setMeta" role="button" tabindex="0" aria-label="Service details"></div>
+
+    <div class="row row--split">
+      <button class="btn btn--primary" id="btnAddItem" type="button">Add song</button>
+      <button class="btn btn--ghost" id="btnAddElement" type="button">Add element</button>
+    </div>
+
+    <ol class="items" id="itemList"></ol>
+    <div class="empty empty--first" id="itemsEmpty">
+      <h2>Empty running order</h2>
+      <p><strong>Add song</strong> for anything you'll play. <strong>Add element</strong>
+         for welcome, scripture, offering, sermon — they take time too, and the
+         running clock counts them.</p>
+    </div>
+
+    <div class="row row--split">
+      <button class="btn btn--ghost" id="btnSheet" type="button">Sheet / PDF</button>
+      <button class="btn btn--live" id="btnLive" type="button">Run service</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ LIVE ============ -->
+<section class="view view--live" id="view-live">
+  <div class="live">
+    <div class="live__bar">
+      <button class="btn btn--tiny btn--ondark" id="btnExitLive" type="button">Exit</button>
+      <span class="live__progress" id="liveProgress">0 / 0</span>
+      <button class="btn btn--tiny btn--ondark" id="btnResetTicks" type="button">Reset</button>
+    </div>
+    <ol class="livelist" id="liveList"></ol>
+    <p class="empty empty--live" id="liveEmpty">Nothing to run — add songs first.</p>
+  </div>
+</section>
+
+<!-- ============ SHEET (also the print target) ============ -->
+<section class="view" id="view-sheet">
+  <div class="sheetwrap">
+    <div class="row row--split noprint">
+      <button class="btn btn--ghost" id="btnSheetBack" type="button">Back to editor</button>
+      <button class="btn btn--primary" id="btnPrint" type="button">Save as PDF</button>
+    </div>
+
+    <!-- Per-person views. Everyone gets the same running order; they just
+         don't get each other's clutter. -->
+    <div class="sheetviews noprint" id="sheetViews">
+      <button class="pill is-active" data-sv="full" type="button">Full</button>
+      <button class="pill" data-sv="keys" type="button">Keys / MD</button>
+      <button class="pill" data-sv="band" type="button">Band</button>
+      <button class="pill" data-sv="vocals" type="button">Vocals</button>
+      <button class="pill" data-sv="media" type="button">Media &amp; sound</button>
+    </div>
+
+    <article class="sheet" id="sheet"></article>
+    <p class="hint noprint">
+      In the print dialog choose <strong>Save as PDF</strong> as the destination.
+      Each view prints as its own sheet, so print the ones you need one at a time.
+    </p>
+  </div>
+</section>
+
+<!-- ============ MODAL ============ -->
+<div class="modal" id="modal" hidden>
+  <div class="modal__scrim"></div>
+  <div class="modal__sheet" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <header class="modal__head">
+      <h2 class="modal__title" id="modalTitle">Edit</h2>
+    </header>
+    <div class="modal__body" id="modalBody"></div>
+    <footer class="modal__foot">
+      <button class="btn btn--ghost" id="modalCancel" type="button">Cancel</button>
+      <button class="btn btn--primary" id="modalSave" type="button">Save</button>
+    </footer>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
+
+<div id="updateBar" class="update noprint" hidden>
+  <span>A new version is ready.</span>
+  <button id="btnUpdate" class="btn btn--tiny" type="button">Reload</button>
+</div>
+
+<script src="js/db.js"></script>
+<script src="js/chords.js"></script>
+<script src="js/sample.js"></script>
+<script src="js/metronome.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
