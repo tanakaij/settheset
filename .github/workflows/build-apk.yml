@@ -1,0 +1,187 @@
+# ── SetTheSet / .github/workflows/build-apk.yml ──
+# Create this on GitHub at:  .github/workflows/build-apk.yml
+# (Add file -> Create new file, then type the whole path including the slashes.)
+#
+# Adapted from the PlotEdge workflow. Same Capacitor approach, and Capacitor is
+# the right choice here rather than a Bubblewrap/TWA wrapper: a TWA verifies
+# ownership via /.well-known/assetlinks.json at the DOMAIN ROOT, and a GitHub
+# project page lives at username.github.io/settheset/ — the root belongs to a
+# different repo. Capacitor sidesteps that entirely by bundling the web assets
+# into the APK, which also means the app works on a phone that has never once
+# reached the Pages URL.
+
+name: Build SetTheSet APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          # 17, not 21. The Capacitor 6 / AGP 8.2 toolchain builds under 17.
+          java-version: '17'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run the test suite
+        # The gate. A build that ships a broken app is worse than no build,
+        # because the APK installs over a working one — and on a Sunday morning
+        # you find out in front of the congregation.
+        run: npm test
+
+      # ══ STAGE THE WEB APP ══
+      # capacitor.config.json points webDir at www/. index.html alone produces
+      # an APK that launches to an unstyled blank page. Nothing here is
+      # committed back; www/ is throwaway.
+      - name: Stage the web app into www/ for Capacitor
+        run: |
+          set -e
+          rm -rf www
+          mkdir -p www
+          cp index.html www/index.html
+          cp settheset-sw.js www/settheset-sw.js
+          cp settheset.manifest.json www/settheset.manifest.json
+          cp -r css www/css
+          cp -r js www/js
+          # resources/ holds runtime images AND logo-source.jpg, the 1.4 MB
+          # master artwork that tools/make_icons.py reads at authoring time.
+          # It never reaches a WebView, so it does not belong in the APK.
+          mkdir -p www/resources
+          find resources -maxdepth 1 -type f ! -name 'logo-source.jpg' \
+            -exec cp {} www/resources/ \;
+          echo "Staged web payload: $(du -sh www | cut -f1)"
+
+      - name: Verify every referenced file was staged
+        # Catches what the copy above cannot: a new css/ or js/ file added to
+        # index.html but never staged. Invisible on the Pages build (same
+        # folder), fatal in the APK.
+        run: |
+          set -e
+          MISSING=0
+          for f in $(grep -o 'href="css/[^"]*"' index.html | sed 's/href="//;s/"//'); do
+            [ -f "www/$f" ] || { echo "::error::index.html references $f but it was not staged"; MISSING=1; }
+          done
+          for f in $(grep -o 'src="js/[^"]*"' index.html | sed 's/src="//;s/"//'); do
+            [ -f "www/$f" ] || { echo "::error::index.html references $f but it was not staged"; MISSING=1; }
+          done
+          for f in $(grep -oh 'resources/[A-Za-z0-9._-]*\.png' index.html settheset.manifest.json settheset-sw.js | sort -u); do
+            [ -f "www/$f" ] || { echo "::error::$f is referenced but was not staged"; MISSING=1; }
+          done
+          [ "$MISSING" = "0" ] || exit 1
+          echo "All referenced assets staged."
+
+      - name: Add the Android platform
+        run: npx cap add android
+
+      # Without this, every CI build signs with a fresh random debug key,
+      # Android refuses the update as INSTALL_FAILED_UPDATE_INCOMPATIBLE, and
+      # the only way forward is uninstall — which deletes every service, song
+      # and arrangement stored on the device. See BUILD_APK.md.
+      - name: Patch signing config and versionCode
+        env:
+          # The committed keystore at signing/settheset-release.keystore is the
+          # default. Set these repository secrets only to override it.
+          SETTHESET_KEYSTORE_B64: ${{ secrets.SETTHESET_KEYSTORE_B64 }}
+          SETTHESET_KEYSTORE_PASSWORD: ${{ secrets.SETTHESET_KEYSTORE_PASSWORD }}
+          SETTHESET_KEY_ALIAS: ${{ secrets.SETTHESET_KEY_ALIAS }}
+          SETTHESET_KEY_PASSWORD: ${{ secrets.SETTHESET_KEY_PASSWORD }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -e
+          if [ -n "$SETTHESET_KEYSTORE_B64" ]; then
+            echo "$SETTHESET_KEYSTORE_B64" | base64 -d > /tmp/settheset.jks
+            export SETTHESET_KEYSTORE_PATH=/tmp/settheset.jks
+          fi
+          python3 scripts/patch-android-signing.py
+
+      # theme-color only styles the status bar for the Chrome-installed PWA.
+      # In the APK the status bar comes from the Android theme, and Capacitor's
+      # default is a stock blue-grey -- a band of the wrong colour above the
+      # top bar that nobody spots until it is on a phone.
+      - name: Match the native status bar to the app
+        run: python3 scripts/patch-android-theme.py
+
+      - name: Sync web assets into the Android project
+        run: npx cap sync android
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      # assembleRelease, not assembleDebug. A debuggable sideloaded APK from an
+      # unknown signer is exactly the profile Play Protect and most OEM package
+      # installers hold back on the first attempt — that is the
+      # cancel-then-install-again dance.
+      - name: Build release APK
+        run: cd android && ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Fail if no real APK was produced
+        run: |
+          set -e
+          OUT=android/app/build/outputs/apk/release
+          APK="$OUT/app-release.apk"
+
+          # Gradle names the artifact app-release-unsigned.apk when the release
+          # build type has no signingConfig. If the signing patch ever stops
+          # matching build.gradle, the build still goes green and quietly ships
+          # an APK Android refuses to install. Fail loudly instead.
+          if [ ! -f "$APK" ] && [ -f "$OUT/app-release-unsigned.apk" ]; then
+            echo "::error::Gradle produced an UNSIGNED release APK — the signing patch did not apply. Check scripts/patch-android-signing.py against android/app/build.gradle."
+            exit 1
+          fi
+          if [ ! -f "$APK" ]; then
+            echo "::error::Gradle reported success but produced no APK"
+            ls -la "$OUT" || true
+            exit 1
+          fi
+          SIZE=$(stat -c%s "$APK")
+          if [ "$SIZE" -lt 1000000 ]; then
+            echo "::error::APK is only $SIZE bytes — the web assets did not make it in"
+            exit 1
+          fi
+          cp "$APK" "$OUT/SetTheSet.apk"
+          echo "Built SetTheSet.apk ($SIZE bytes)"
+
+      - name: Upload APK (workflow artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: SetTheSet-release-apk
+          path: android/app/build/outputs/apk/release/SetTheSet.apk
+          if-no-files-found: error
+          retention-days: 90
+
+      # A Release has one stable download URL that never changes between builds:
+      #   https://github.com/<you>/<repo>/releases/download/latest/SetTheSet.apk
+      # That is the link to send the worship team.
+      - name: Publish APK to the "latest" GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: SetTheSet (latest build)
+          body: Automatically rebuilt from the latest push to `main`. Download `SetTheSet.apk` below.
+          make_latest: true
+          files: android/app/build/outputs/apk/release/SetTheSet.apk
