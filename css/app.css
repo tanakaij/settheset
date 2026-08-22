@@ -453,6 +453,16 @@ select {
    directly over the sheet's Cancel/Save buttons and swallowed every tap.
    Anything overlaying the modal must be able to be dismissed from the modal. */
 .modal { position: fixed; inset: 0; z-index: 90; display: flex; align-items: flex-end; }
+/* The [hidden] attribute is how app.js shows/hides this element (el('modal').hidden
+   = true/false). Browsers hide [hidden] elements via a user-agent stylesheet rule,
+   but that rule loses to the author rule above because .modal declares its own
+   `display`, and author styles always beat the UA stylesheet regardless of
+   selector order or specificity. Without this override the modal (and its scrim)
+   stays permanently laid over the whole screen, at z-index 90, silently eating
+   every tap on the real buttons underneath it — which is why nothing responds
+   on first launch. This rule's selector is more specific than `.modal` alone, so
+   it wins and actually hides the element when JS sets hidden. */
+.modal[hidden] { display: none; }
 .modal__scrim { position: absolute; inset: 0; background: rgba(10,11,14,0.66); }
 
 /* Deliberately not dismiss-on-scrim-tap: hands are busy at the keys and a
@@ -474,7 +484,11 @@ select {
 
 @keyframes rise { from { transform: translateY(18px); opacity: 0.4; } to { transform: none; opacity: 1; } }
 
-.modal__head { padding: 16px var(--pad) 10px; border-bottom: 1px solid var(--line); }
+.modal__head {
+  flex: 0 0 auto;   /* never shrink the title bar to make room for the body */
+  padding: 16px var(--pad) 10px;
+  border-bottom: 1px solid var(--line);
+}
 .modal__head::before {
   content: "";
   display: block;
@@ -487,6 +501,15 @@ select {
 .modal__title {
   font-family: var(--font-display); margin: 0; font-size: 19px; font-weight: 800; }
 .modal__body {
+  /* flex: 1 1 auto + min-height: 0 is what actually lets this column scroll.
+     .modal__sheet is a flex column with a capped max-height; without
+     min-height: 0 a flex child defaults to min-height: auto, which means it
+     will never shrink below its content size. So long help/instruction text
+     was pushing the sheet's total height past max-height and the footer
+     (and the tail of the text) got clipped off outside the viewport instead
+     of the overflow-y: auto below ever kicking in. */
+  flex: 1 1 auto;
+  min-height: 0;
   padding: var(--pad);
   padding-left: calc(var(--pad) + env(safe-area-inset-left));
   padding-right: calc(var(--pad) + env(safe-area-inset-right));
@@ -496,6 +519,7 @@ select {
 }
 
 .modal__foot {
+  flex: 0 0 auto;   /* never shrink the Cancel/Save bar off screen */
   display: flex;
   gap: 10px;
   padding: 12px var(--pad);
