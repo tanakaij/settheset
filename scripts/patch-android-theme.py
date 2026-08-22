@@ -46,11 +46,30 @@ def fail(msg):
     sys.exit(1)
 
 
+EMPTY_RESOURCES = '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n</resources>\n'
+
+
 def patch_colors():
+    # Capacitor's Android template does NOT ship values/colors.xml -- its
+    # launcher colour lives in values/ic_launcher_background.xml instead. So
+    # this file is normally absent on a fresh `cap add android`, and creating
+    # it is correct rather than an error.
+    if not VALUES.exists():
+        fail(
+            f"{VALUES} not found — `npx cap add android` did not produce an "
+            f"Android project. Check the step before this one."
+        )
+
     if not COLORS.exists():
-        fail(f"{COLORS} not found — run `npx cap add android` first")
+        COLORS.write_text(EMPTY_RESOURCES)
+        print(f"colors.xml did not exist (normal for Capacitor) — created it")
 
     text = COLORS.read_text()
+
+    # A freshly created or oddly formatted file might have no closing tag to
+    # insert before; normalise rather than silently writing nothing.
+    if "</resources>" not in text:
+        text = EMPTY_RESOURCES
 
     wanted = {
         "settheset_status": PANEL,
@@ -72,22 +91,42 @@ def patch_colors():
 
 def patch_styles():
     if not STYLES.exists():
-        fail(f"{STYLES} not found — run `npx cap add android` first")
+        listing = "\n".join(sorted(p.name for p in VALUES.iterdir())) or "(empty)"
+        fail(
+            f"{STYLES} not found. Files actually present in {VALUES}:\n{listing}"
+        )
 
     text = STYLES.read_text()
 
-    # Capacitor's launch theme and main theme are separate. Patch whichever
-    # AppTheme.NoActionBar block exists; that is the one the activity uses.
+    # Capacitor's launch theme and main theme are separate. Patch the one the
+    # activity actually uses, never the *Launch splash variant.
     match = re.search(
         r'(<style name="AppTheme\.NoActionBar"[^>]*>)(.*?)(</style>)',
         text,
         re.DOTALL,
     )
+
     if not match:
+        # Fall back to any non-launch NoActionBar theme, so a template rename
+        # doesn't break the build outright.
+        for m in re.finditer(r'(<style name="([^"]+)"[^>]*>)(.*?)(</style>)', text, re.DOTALL):
+            name = m.group(2)
+            if "NoActionBar" in name and "Launch" not in name:
+                match = re.match(
+                    r'(<style name="[^"]+"[^>]*>)(.*?)(</style>)',
+                    m.group(0),
+                    re.DOTALL,
+                )
+                text_offset = m.start()
+                print(f"note: AppTheme.NoActionBar absent, using {name} instead")
+                break
+
+    if not match:
+        names = re.findall(r'<style name="([^"]+)"', text)
         fail(
-            "AppTheme.NoActionBar not found in styles.xml. Capacitor changed its "
-            "template — inspect android/app/src/main/res/values/styles.xml and "
-            "update this script."
+            "No usable NoActionBar theme in styles.xml. Styles present: "
+            + (", ".join(names) or "(none)")
+            + ". Capacitor changed its template — update this script."
         )
 
     head, body, tail = match.groups()
@@ -109,7 +148,10 @@ def patch_styles():
         else:
             body = body.rstrip() + f"\n        {entry}\n    "
 
-    text = text[: match.start()] + head + body + tail + text[match.end():]
+    # Rebuild by locating the original block verbatim, which works whether the
+    # match came from the direct search or the fallback scan.
+    original = match.group(0)
+    text = text.replace(original, head + body + tail, 1)
     STYLES.write_text(text)
 
     print("styles.xml: statusBarColor, navigationBarColor, windowBackground, "
