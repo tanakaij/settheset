@@ -9,7 +9,7 @@
  * always re-fetches this file rather than serving it from the HTTP cache,
  * which is what makes the bump take effect on the next load.
  */
-var CACHE_VERSION = 'v5';
+var CACHE_VERSION = 'v6';
 var SHELL_CACHE = 'settheset-shell-' + CACHE_VERSION;
 
 /* Note: './' is deliberately absent. cache.addAll() rejects wholesale if any

@@ -139,5 +139,33 @@ const appJs = read('js/app.js');
 check('vibrate is feature-detected', appJs.includes('if (!navigator.vibrate) return'));
 check('vibrate calls are guarded', appJs.includes('try { navigator.vibrate'));
 
+
+console.log('\n— stacking order: nothing may cover an open sheet —');
+const layer = name => {
+  const m = cssText.match(new RegExp('\\' + name + '[^{]*\\{[^}]*z-index:\\s*(\\d+)', 's'));
+  return m ? parseInt(m[1], 10) : null;
+};
+const zModal = layer('.modal ');
+const zUpdate = layer('.update ');
+const zToast = layer('.toast ');
+check('modal has a z-index', zModal !== null);
+check('update bar sits BELOW the modal', zUpdate !== null && zUpdate < zModal);
+check('toast sits above the modal', zToast !== null && zToast > zModal);
+check('update bar is hidden while a sheet is open', appJs.includes("$('updateBar').hidden = UI.isOpen()"));
+check('update bar returns after the sheet closes', appJs.includes('if (updatePending)'));
+
+console.log('\n— android launcher assets —');
+const densities = ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi'];
+for (const d of densities) {
+  for (const n of ['ic_launcher', 'ic_launcher_round', 'ic_launcher_foreground']) {
+    const f = 'resources/android/' + n + '-' + d + '.png';
+    check(f + ' committed', fs.existsSync(path.join(ROOT, f)));
+  }
+}
+check('splash committed', fs.existsSync(path.join(ROOT, 'resources/android/splash.png')));
+const iconPatch = read('scripts/patch-android-icons.py');
+check('icon patch uses the panel colour', iconPatch.includes('#FF1B1C21'));
+check('icon patch verifies it landed', iconPatch.includes('would ship the default logo'));
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

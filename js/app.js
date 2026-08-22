@@ -149,12 +149,18 @@
     show(view);
   }
 
+  var updatePending = false;
+
   UI.onOpen = function () {
     history.pushState({ modal: true, v: state.view }, '');
     modalPushed = true;
+    // Belt and braces alongside the z-index: an update prompt floating over an
+    // open sheet is clutter even when it is not intercepting taps.
+    if (updatePending) $('updateBar').hidden = true;
   };
 
   UI.onClosed = function () {
+    if (updatePending) $('updateBar').hidden = false;
     // Save/Cancel closed the sheet: retire the history entry it pushed.
     if (!modalPushed) return;
     modalPushed = false;
@@ -169,6 +175,7 @@
     if (UI.isOpen()) {
       modalPushed = false;
       UI.closeSilent();
+      if (updatePending) $('updateBar').hidden = false;
       return;
     }
 
@@ -770,6 +777,9 @@
       confirmLabel: 'Clear',
       onConfirm: function () {
         state.set.items.forEach(function (i) { i.performed = false; });
+        // starting the run over means the click belongs to nothing
+        Metronome.stop();
+        state.clickIdx = -1;
         DB.put('setlists', state.set).then(renderLive);
       }
     });
@@ -834,7 +844,7 @@
         (canClick
           ? '<div class="lcard__tools">' +
               '<button class="clickbtn' + (running ? ' is-on' : '') + '" type="button" data-click="' + idx + '">' +
-                '<span class="clickbtn__dots" id="beat-' + idx + '">' + beatDots(it, running) + '</span>' +
+                '<span class="clickbtn__dots" id="beat-' + idx + '">' + beatDots(it) + '</span>' +
                 '<span class="clickbtn__label">' + (running ? 'Stop click' : 'Click ' + esc(it.bpm)) + '</span>' +
               '</button>' +
             '</div>'
@@ -867,7 +877,7 @@
   /* One dot per beat in the bar, so you can see the pulse as well as hear it.
      Useful when the click is in an earpiece and you want to check you set the
      right meter before the band comes in. */
-  function beatDots(it, running) {
+  function beatDots(it) {
     var m = Metronome.parseMeter(it.meter, it.bpm);
     var out = '';
     for (var i = 0; i < m.beatsPerBar; i++) {
@@ -1206,7 +1216,9 @@
           if (!incoming) return;
           incoming.addEventListener('statechange', function () {
             if (incoming.state === 'installed' && navigator.serviceWorker.controller) {
-              $('updateBar').hidden = false;
+              updatePending = true;
+              // never surface it over an open sheet
+              $('updateBar').hidden = UI.isOpen();
               $('btnUpdate').onclick = function () { incoming.postMessage({ type: 'SKIP_WAITING' }); };
             }
           });

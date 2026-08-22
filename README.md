@@ -73,8 +73,9 @@ settheset-sw.js                service worker — BUMP CACHE_VERSION ON CHANGES
 settheset.manifest.json        PWA manifest
 resources/                     icons (from mark.svg) + three subset woff2 faces
 tools/make_icons.py            regenerates them
-tests/                         npm test — 309 assertions, gates the APK build
-scripts/                       Capacitor signing + Android theme patches
+tools/make_android_assets.py   renders the APK launcher icons (run locally)
+tests/                         npm test — 332 assertions, gates the APK build
+scripts/                       Capacitor signing, theme and launcher-icon patches
 signing/                       the stable release keystore — DO NOT DELETE
 .github/workflows/build-apk.yml
 .nojekyll                      tells Pages to serve files as-is
