@@ -1256,8 +1256,6 @@ select {
   }
 }
 
-}
-
 @media (max-width: 360px) {
   :root { --pad: 12px; }
   .chart { margin-left: 0; }

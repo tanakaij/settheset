@@ -57,6 +57,16 @@ self.addEventListener('activate', function (e) {
 
 self.addEventListener('message', function (e) {
   if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
+
+  /* Lets app.js ask "which build are you" before deciding whether the
+     "new version is ready" banner is honest. Two service worker files can be
+     byte-different (whitespace, comments, staging artefacts from the CI
+     build) without CACHE_VERSION having actually moved — that mismatch used
+     to be enough on its own to trigger the banner, which is why it could
+     show up with nothing meaningfully new inside it. */
+  if (e.data && e.data.type === 'GET_VERSION' && e.ports && e.ports[0]) {
+    e.ports[0].postMessage({ version: CACHE_VERSION });
+  }
 });
 
 self.addEventListener('fetch', function (e) {

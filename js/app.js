@@ -913,8 +913,33 @@
   });
 
   /* Keep the screen awake during a service. Without this the tablet sleeps
-     mid-song and you're unlocking it with one hand on the keys. */
+     mid-song and you're unlocking it with one hand on the keys.
+
+     The web Screen Wake Lock API (navigator.wakeLock) is the fallback for
+     the browser/PWA install, but it does NOT work inside the packaged
+     Android APK: Android's WebView blocks the "screen-wake-lock" feature by
+     its default Permissions Policy, so request() rejects with
+     NotAllowedError every time, silently, and the screen keeps sleeping.
+     That's a WebView platform restriction, not something fixable from CSS
+     or JS alone.
+
+     The reliable fix on Android is the native KeepAwake plugin
+     (@capacitor-community/keep-awake), which sets the window's
+     FLAG_KEEP_SCREEN_ON directly and isn't subject to that WebView policy.
+     Once it's installed (npm install @capacitor-community/keep-awake &&
+     npx cap sync android — see BUILD_APK.md), Capacitor's native bridge
+     exposes it at window.Capacitor.Plugins.KeepAwake automatically; no JS
+     import or bundler is needed for that. If the plugin isn't present
+     (e.g. running as a plain browser tab/PWA, where window.Capacitor
+     doesn't exist), this falls back to the web API. */
+  function nativeKeepAwake() {
+    return window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.KeepAwake;
+  }
+
   function lockScreen() {
+    var native = nativeKeepAwake();
+    if (native) { native.keepAwake().catch(function () { /* not worth interrupting for */ }); return; }
+
     if (!('wakeLock' in navigator)) return;
     navigator.wakeLock.request('screen').then(function (l) {
       state.wakeLock = l;
@@ -923,6 +948,9 @@
   }
 
   function releaseScreen() {
+    var native = nativeKeepAwake();
+    if (native) { native.allowSleep().catch(function () { /* not worth interrupting for */ }); return; }
+
     if (state.wakeLock) { state.wakeLock.release(); state.wakeLock = null; }
   }
 
@@ -1208,6 +1236,23 @@
   /* ============================================================
      BOOT
      ============================================================ */
+  /* Ask a service worker instance which CACHE_VERSION it's running, so the
+     update banner can be gated on an actual version change rather than on
+     "the script's bytes differ", which fires for whitespace/comment-only
+     diffs too and produces a banner with nothing behind it. Resolves null
+     if the worker doesn't answer in time rather than hanging forever. */
+  function swVersion(worker) {
+    return new Promise(function (resolve) {
+      if (!worker) { resolve(null); return; }
+      var settled = false;
+      var done = function (v) { if (!settled) { settled = true; resolve(v); } };
+      var ch = new MessageChannel();
+      ch.port1.onmessage = function (e) { done(e.data && e.data.version); };
+      try { worker.postMessage({ type: 'GET_VERSION' }, [ch.port2]); } catch (e) { done(null); }
+      setTimeout(function () { done(null); }, 1500);
+    });
+  }
+
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('settheset-sw.js', { updateViaCache: 'none' }).then(function (reg) {
@@ -1216,10 +1261,20 @@
           if (!incoming) return;
           incoming.addEventListener('statechange', function () {
             if (incoming.state === 'installed' && navigator.serviceWorker.controller) {
-              updatePending = true;
-              // never surface it over an open sheet
-              $('updateBar').hidden = UI.isOpen();
-              $('btnUpdate').onclick = function () { incoming.postMessage({ type: 'SKIP_WAITING' }); };
+              Promise.all([
+                swVersion(incoming),
+                swVersion(navigator.serviceWorker.controller)
+              ]).then(function (v) {
+                var incomingVersion = v[0], currentVersion = v[1];
+                // Only nag when we can positively confirm the build changed.
+                // If both answered and they match, this is a no-op rebuild
+                // (e.g. only comments/whitespace changed) — say nothing.
+                if (incomingVersion && currentVersion && incomingVersion === currentVersion) return;
+                updatePending = true;
+                // never surface it over an open sheet
+                $('updateBar').hidden = UI.isOpen();
+                $('btnUpdate').onclick = function () { incoming.postMessage({ type: 'SKIP_WAITING' }); };
+              });
             }
           });
         });
