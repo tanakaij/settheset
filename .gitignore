@@ -1,0 +1,34 @@
+# ── SetTheSet / .gitignore ──
+
+# Dependencies. Restored by `npm install`.
+node_modules/
+
+# The Capacitor Android project. Regenerated from scratch by the workflow on
+# every build (`npx cap add android`), and scripts/ rewrites parts of it.
+android/
+www/
+
+__pycache__/
+*.pyc
+
+# Build output
+*.apk
+*.aab
+*.idsig
+dist/
+build/
+
+# Local env / editor / OS noise
+.env
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.log
+npm-debug.log*
+
+# NOTE — signing/settheset-release.keystore is deliberately NOT ignored.
+# It must stay in the repo, byte-identical between builds. If it is lost, no
+# future build can update an existing install: every user has to uninstall,
+# which deletes their services and song library. See BUILD_APK.md.
