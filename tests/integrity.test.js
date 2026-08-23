@@ -93,6 +93,12 @@ check('long titles can wrap', css.includes('overflow-wrap: anywhere'));
 check('flex children can shrink', /\.item__title\s*\{[^}]*min-width:\s*0/s.test(css));
 check('action rows wrap', /\.item__acts\s*\{[^}]*flex-wrap:\s*wrap/s.test(css));
 check('narrow-screen breakpoint exists', css.includes('@media (max-width: 360px)'));
+/* Found in QA at 320px: one long name in the sheet's role list set the width
+   of the whole document and scrolled the entire page sideways, because the
+   role/name pair was nowrap with no min-width escape. */
+check('sheet role pairs can wrap', /\.srow__roles div\s*\{[^}]*flex-wrap:\s*wrap/s.test(css));
+check('sheet role pairs can shrink', /\.srow__roles div\s*\{[^}]*min-width:\s*0/s.test(css));
+check('a long name wraps rather than overflows', /\.srow__roles dd\s*\{[^}]*overflow-wrap:\s*anywhere/s.test(css));
 
 console.log('\n— markup validity —');
 check('no block elements nested in a button',
@@ -146,13 +152,81 @@ const layer = name => {
   return m ? parseInt(m[1], 10) : null;
 };
 const zModal = layer('.modal ');
-const zUpdate = layer('.update ');
 const zToast = layer('.toast ');
 check('modal has a z-index', zModal !== null);
-check('update bar sits BELOW the modal', zUpdate !== null && zUpdate < zModal);
 check('toast sits above the modal', zToast !== null && zToast > zModal);
-check('update bar is hidden while a sheet is open', appJs.includes("$('updateBar').hidden = UI.isOpen()"));
-check('update bar returns after the sheet closes', appJs.includes('if (updatePending)'));
+
+console.log('\n— updates apply silently, with no banner —');
+check('no update bar in the markup', !html.includes('id="updateBar"'));
+check('no update bar styles left behind', !/^\.update\s*\{/m.test(cssText));
+check('a waiting worker is held, not announced', appJs.includes('pendingWorker'));
+check('the swap is gated on being idle', appJs.includes('function applyUpdateIfIdle'));
+check('never swaps with a sheet open', /applyUpdateIfIdle[\s\S]{0,400}UI\.isOpen\(\)/.test(appJs));
+check('never swaps off a list screen',
+  /applyUpdateIfIdle[\s\S]{0,500}state\.view !== 'sets'[\s\S]{0,60}state\.view !== 'songs'/.test(appJs));
+
+console.log('\n— the modal tracks the visible viewport, not the layout one —');
+check('viewport height variable declared', cssText.includes('--vvh'));
+check('modal is sized from it', /\.modal\s*\{[^}]*var\(--vvh/s.test(cssText));
+check('modal no longer uses inset: 0', !/\.modal\s*\{[^}]*inset:\s*0/s.test(cssText));
+check('visualViewport is observed', read('js/ui.js').includes('visualViewport'));
+check('there is a fallback for browsers without it', read('js/ui.js').includes('global.innerHeight'));
+
+console.log('\n— documents are generated, not printed —');
+const exportJs = read('js/export.js');
+check('export module exists', fs.existsSync(path.join(ROOT, 'js/export.js')));
+check('export.js is loaded by index.html', html.includes('js/export.js'));
+check('export.js is precached', sw.includes("'js/export.js'"));
+check('a PDF writer is present', exportJs.includes('%PDF-1.4'));
+check('a DOCX writer is present', exportJs.includes('word/document.xml'));
+check('PDF and Word buttons exist', html.includes('id="btnPdf"') && html.includes('id="btnDocx"'));
+check('both are wired up', appJs.includes("$('btnPdf')") && appJs.includes("$('btnDocx')"));
+check('the sheet model feeds them', appJs.includes('function sheetModel'));
+check('saving prefers the native filesystem', exportJs.includes('Filesystem'));
+check('and falls back to a download', exportJs.includes('saveBrowser'));
+check('print is still available for desktop', html.includes('id="btnPrint"'));
+check('setlist is a selectable view', html.includes('data-sv="setlist"'));
+check('setlist view is defined', appJs.includes('setlist: { label: '));
+check('setlist has its own model', appJs.includes('function setlistModel'));
+check('setlist has its own screen renderer', appJs.includes('function renderSetlistSheet'));
+check('setlist has its own PDF layout', exportJs.includes('function buildSetlistPdf'));
+check('the PDF writer branches on it', exportJs.includes("model.layout === 'setlist'"));
+check('setlist drops elements', /setlistModel[\s\S]{0,300}filter\(isSong\)/.test(appJs));
+check('exports follow the selected view', appJs.includes('function currentModel'));
+
+console.log('\n— building a service from a written list —');
+const importJs = read('js/import.js');
+check('parser module exists', fs.existsSync(path.join(ROOT, 'js/import.js')));
+check('parser is loaded by index.html', html.includes('js/import.js'));
+check('parser is precached', sw.includes("'js/import.js'"));
+check('import entry point exists', html.includes('id="btnImport"'));
+check('review view exists', html.includes('id="view-import"'));
+check('review view is registered in show()', appJs.includes("'sheet', 'import'"));
+check('review view has a depth', /DEPTH\s*=\s*\{[^}]*import:/.test(appJs));
+check('nothing is created without review', appJs.includes("$('btnImportCreate')"));
+check('camera and OCR are both optional',
+  appJs.includes('function ocrPlugin') && appJs.includes('function cameraPlugin'));
+check('OCR result shapes are handled defensively', appJs.includes('function ocrText'));
+check('rows can be skipped', appJs.includes('data-drop'));
+check('missing keys are flagged', appJs.includes('needsKey'));
+
+/* Three bugs found in QA, pinned so they cannot come back:
+     1. the review screen had no PARENT, so the top-bar Back button was dead;
+     2. navTo() from inside the sheet's onSave had the sheet's own close
+        handler swallow the entry the review screen had just pushed;
+     3. service elements were flagged as missing a key, which trains people
+        to ignore the flag on the songs where it actually matters. */
+check('review screen has a parent for Back', /PARENT\s*=\s*\{[^}]*import:\s*'sets'/.test(appJs));
+check('the sheet entry is replaced, not stacked', appJs.includes('function enterReview'));
+check('entering review retires the sheet entry itself',
+  /enterReview[\s\S]{0,400}modalPushed = false[\s\S]{0,200}closeSilent/.test(appJs));
+check('an emptied review screen is not restored from history',
+  /target === 'import' && !importRows\.length/.test(appJs));
+check('elements are exempt from the key flag',
+  importJs.includes('!row.element && !row.key'));
+check('the original line is retained', importJs.includes('raw:'));
+check('library matches inherit the chart',
+  /lib\)\s*\{[\s\S]{0,300}'chords'/.test(appJs));
 
 console.log('\n— android launcher assets —');
 const densities = ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi'];

@@ -73,8 +73,23 @@
 
   --tap: 52px;          /* generous: this gets tapped mid-song */
   --pad: 16px;
-  --r:   14px;          /* card radius, from the reference */
-  --r-s: 10px;
+  --r:   16px;          /* card radius */
+  --r-s: 12px;
+  --r-l: 22px;
+
+  /* Raised surfaces, so a card reads as sitting ON the page rather than being
+     a differently-coloured rectangle painted onto it. */
+  --surface:    linear-gradient(180deg, #363D4E 0%, #2E3442 100%);
+  --surface-hi: linear-gradient(180deg, #3F4658 0%, #363C4B 100%);
+  --shadow:     0 1px 0 rgba(255,255,255,0.05) inset, 0 6px 18px rgba(8,10,16,0.32);
+  --shadow-lift: 0 1px 0 rgba(255,255,255,0.07) inset, 0 12px 30px rgba(8,10,16,0.44);
+
+  /* Set from JS off visualViewport. The Android keyboard shrinks the VISUAL
+     viewport but not the layout viewport, so a `position: fixed; inset: 0`
+     bottom sheet keeps its full height and pushes its own footer buttons
+     underneath the keyboard. This var tracks what is actually on screen. */
+  --vvh: 100dvh;
+  --vvtop: 0px;
 }
 
 * { box-sizing: border-box; }
@@ -89,6 +104,12 @@ html {
 body {
   margin: 0;
   background: var(--bg);
+  /* Two very soft pools of colour, fixed so they don't scroll with content.
+     Costs nothing and stops a full screen of dark slate reading as flat. */
+  background-image:
+    radial-gradient(1100px 520px at 88% -8%, rgba(107,79,232,0.20), transparent 62%),
+    radial-gradient(820px 460px at -12% 4%, rgba(39,234,252,0.09), transparent 60%);
+  background-attachment: fixed;
   color: var(--text);
   font-family: var(--font-ui);
   font-size: 17px;
@@ -114,6 +135,7 @@ body {
   padding-left: calc(var(--pad) + env(safe-area-inset-left));
   padding-right: calc(var(--pad) + env(safe-area-inset-right));
   background: var(--panel);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 
 .topbar__mark { width: 30px; height: 38px; object-fit: contain; flex: 0 0 auto; }
@@ -143,6 +165,13 @@ body {
 }
 
 .topbar__nav { display: flex; gap: 6px; }
+
+/* Same trap as .modal below: app.js hides this with the [hidden] attribute,
+   but the author `display: flex` above beats the user-agent rule that would
+   have hidden it. Without this the Sets/Songs tabs stayed on screen in the
+   editor, the sheet and the live view — squeezing the title to an ellipsis
+   and offering to navigate away mid-edit. */
+.topbar__nav[hidden] { display: none; }
 
 .tab {
   min-height: 40px;
@@ -212,27 +241,84 @@ body {
 
 /* ---------------- buttons ---------------- */
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   min-height: var(--tap);
   padding: 0 18px;
   font: inherit;
   font-weight: 700;
+  letter-spacing: -0.005em;
   color: var(--text);
-  background: var(--card);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-s);
+  box-shadow: var(--shadow);
   cursor: pointer;
 }
 
 /* mint = "this does the thing", exactly as the reference uses it */
-.btn--primary { background: var(--mint); color: #10231C; border-color: var(--mint); }
-.btn--ghost   { background: var(--card); }
-.btn--block   { width: 100%; }
-.btn--live    { background: var(--grad); color: #fff; border-color: transparent; }
-.btn--tiny    { min-height: 38px; padding: 0 14px; font-size: 14px; border-radius: 999px; }
-.btn--ondark  { background: rgba(255,255,255,0.12); color: #fff; border-color: transparent; }
-.btn--danger  { color: var(--alert); background: var(--card); border-color: var(--line); }
+.btn--primary {
+  background: linear-gradient(180deg, #5CFFC5 0%, var(--mint) 46%, var(--mint-deep) 100%);
+  color: #06231A;
+  border-color: transparent;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.35) inset, 0 8px 22px rgba(1,217,140,0.24);
+}
 
+.btn--ghost   { background: var(--surface); }
+.btn--block   { width: 100%; }
+
+.btn--live {
+  background: var(--grad);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.28) inset, 0 8px 24px rgba(60,140,240,0.28);
+}
+
+.btn--tiny    { min-height: 38px; padding: 0 14px; font-size: 14px; border-radius: 999px; }
+.btn--ondark  { background: rgba(255,255,255,0.12); color: #fff; border-color: transparent; box-shadow: none; }
+.btn--danger  { color: var(--alert); background: var(--surface); border-color: var(--line); }
+
+/* Third-rank action: present, but not competing with the two that matter. */
+.btn--quiet {
+  background: none;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.btn:disabled { opacity: 0.55; cursor: default; }
 .btn:active { transform: translateY(1px); }
+
+/* Format tag inside the export buttons — tells you what you're about to get
+   before you read the label. */
+.btn__ico {
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: rgba(0,0,0,0.16);
+}
+
+.btn--ghost .btn__ico { background: rgba(255,255,255,0.10); color: var(--mint); }
+
+/* Two weighted actions plus a quiet one. On a narrow phone the quiet one
+   drops to its own line rather than squeezing the other two. */
+.exportbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.exportbar #btnPdf  { flex: 2 1 150px; }
+.exportbar #btnDocx { flex: 1 1 120px; }
+.exportbar #btnSetlist { flex: 1 1 130px; }
+.exportbar #btnPrint { flex: 0 0 auto; min-height: 44px; }
 
 :focus-visible { outline: 3px solid var(--mint); outline-offset: 2px; }
 
@@ -258,11 +344,15 @@ body {
 .cards { list-style: none; margin: 14px 0 0; padding: 0; }
 
 .card {
-  background: var(--card);
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: var(--r);
+  box-shadow: var(--shadow);
   margin-bottom: 12px;
   overflow: hidden;
 }
+
+.card:active { box-shadow: var(--shadow-lift); }
 
 .card__main {
   display: block;
@@ -296,8 +386,10 @@ body {
 /* ---------------- service meta ---------------- */
 .setmeta {
   background: var(--grad);
-  border-radius: var(--r);
+  border-radius: var(--r-l);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.24) inset, 0 14px 34px rgba(60,110,220,0.26);
   padding: 18px;
+  cursor: pointer;
 }
 
 .setmeta__date {
@@ -317,10 +409,19 @@ body {
 .items { list-style: none; margin: 0; padding: 0; }
 
 .item {
-  background: var(--card);
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: var(--r);
+  box-shadow: var(--shadow);
   margin-bottom: 12px;
   padding: 14px 15px;
+}
+
+/* Elements are not songs. A marker in the left edge says so without costing
+   a line of text. */
+.item--element {
+  background: linear-gradient(180deg, #2F3543 0%, #292F3C 100%);
+  border-left: 3px solid var(--line-firm);
 }
 
 .item__seg {
@@ -392,6 +493,87 @@ body {
 
 .item__acts .btn--move { flex: 0 0 46px; padding: 0; font-size: 17px; }
 
+/* ---------------- import review ----------------
+   The screen that makes bad OCR survivable. Everything is editable, the
+   original line stays visible so a mangled title can be worked out without
+   going back to the paper, and rows needing a human decision are marked. */
+.importhead { margin-bottom: 4px; }
+
+.importhead__title {
+  font-family: var(--font-display);
+  margin: 0;
+  font-size: 23px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.importhead__sub {
+  margin: 4px 0 0;
+  font-family: var(--font-data);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.improw { padding-bottom: 4px; }
+
+/* A skipped row stays on screen rather than vanishing: you can see what you
+   chose to leave out, and change your mind. */
+.improw--out { opacity: 0.45; }
+.improw--out .field { display: none; }
+
+.improw__top { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
+
+.improw__no {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.improw__tag {
+  font-family: var(--font-data);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--card-hi);
+  color: var(--muted);
+}
+
+.improw__tag--ok  { background: rgba(72,248,186,0.16); color: var(--mint); }
+.improw__tag--new { background: rgba(39,234,252,0.14); color: var(--cyan); }
+
+.improw__drop {
+  margin-left: auto;
+  min-height: 36px;
+  padding: 0 13px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--card-hi);
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+/* What the camera actually saw. Kept in mono so a misread character is
+   visible as a character rather than blending into the prose. */
+.improw__raw {
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 10px;
+  padding-left: 9px;
+  border-left: 2px solid var(--line-firm);
+  overflow-wrap: anywhere;
+}
+
+.field__label--warn { color: var(--alert); }
+
 /* ---------------- inputs ---------------- */
 .search { display: block; margin-top: 12px; }
 
@@ -452,7 +634,22 @@ select {
    The update bar previously sat at 70, above the modal at 60 — which put it
    directly over the sheet's Cancel/Save buttons and swallowed every tap.
    Anything overlaying the modal must be able to be dismissed from the modal. */
-.modal { position: fixed; inset: 0; z-index: 90; display: flex; align-items: flex-end; }
+/* Height comes from --vvh (set in js/ui.js off window.visualViewport), NOT
+   from inset: 0. With inset: 0 the sheet is as tall as the LAYOUT viewport,
+   which the Android soft keyboard does not shrink — so the Cancel/Save bar
+   sat behind the keyboard the moment any text field was focused, and long
+   forms appeared to have no way to save. --vvtop keeps it pinned to the
+   visible area when the page itself is scrolled up by the keyboard. */
+.modal {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: var(--vvtop, 0px);
+  height: var(--vvh, 100dvh);
+  z-index: 90;
+  display: flex;
+  align-items: flex-end;
+}
 /* The [hidden] attribute is how app.js shows/hides this element (el('modal').hidden
    = true/false). Browsers hide [hidden] elements via a user-agent stylesheet rule,
    but that rule loses to the author rule above because .modal declares its own
@@ -470,14 +667,18 @@ select {
 .modal__sheet {
   position: relative;
   width: 100%;
-  max-height: 92vh;
-  max-height: 92dvh;   /* dvh tracks the visible viewport, so the footer
-                          buttons cannot end up below the fold on a phone
-                          with a gesture bar or a retracting address bar */
+  /* The parent is now exactly the visible viewport, so a percentage here is
+     finally trustworthy. The small subtraction keeps a sliver of the screen
+     behind on show, so a full-height sheet still reads as a sheet rather than
+     as a whole new screen you might not know how to leave. */
+  max-height: calc(100% - 14px);
   display: flex;
   flex-direction: column;
   background: var(--bg);
-  border-radius: 20px 20px 0 0;
+  background-image: radial-gradient(760px 300px at 50% 0%, rgba(107,79,232,0.16), transparent 70%);
+  border: 1px solid var(--line-firm);
+  border-bottom: 0;
+  border-radius: var(--r-l) var(--r-l) 0 0;
   box-shadow: 0 -8px 40px rgba(0,0,0,0.55);
   animation: rise 160ms ease-out;
 }
@@ -516,6 +717,17 @@ select {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;   /* stops the page behind scrolling with it */
+  scroll-padding-bottom: 24px;
+
+  /* Scroll shadows, no JS: the `local` layers move with the content and cover
+     the `scroll` shadows when you are at an end, so a fading edge appears only
+     while there is genuinely more to see. Otherwise a long form looks like it
+     simply stops, and people never find the fields below the fold. */
+  background:
+    linear-gradient(var(--bg) 34%, rgba(48,54,68,0)) top / 100% 26px no-repeat local,
+    linear-gradient(rgba(48,54,68,0), var(--bg) 66%) bottom / 100% 26px no-repeat local,
+    radial-gradient(farthest-side at 50% 0, rgba(0,0,0,0.36), rgba(0,0,0,0)) top / 100% 12px no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%, rgba(0,0,0,0.36), rgba(0,0,0,0)) bottom / 100% 12px no-repeat scroll;
 }
 
 .modal__foot {
@@ -930,20 +1142,11 @@ select {
   max-width: 88vw;
 }
 
-.update {
-  position: fixed;
-  left: var(--pad); right: var(--pad);
-  bottom: calc(16px + env(safe-area-inset-bottom));
-  z-index: 50;
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 12px 14px;
-  background: var(--card);
-  border: 1px solid var(--line-firm);
-  border-radius: var(--r-s);
-  font-size: 15px;
-}
-
-.update .btn { background: var(--mint); color: #10231C; border-color: var(--mint); }
+/* The "a new version is ready" banner used to live here. It has been removed
+   entirely: updates now swap themselves in silently once you are back on a
+   list screen with nothing open (see applyUpdateIfIdle in js/app.js), so
+   there is no longer anything to render, and nothing floating over the
+   bottom of every screen. */
 
 /* ============================================================
    THE SHEET
@@ -999,7 +1202,10 @@ select {
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: #55606B;
-  white-space: nowrap;
+  /* Was nowrap, which on a narrow phone ran the date straight under the view
+     badge on the right — two pieces of text overlapping in the one part of
+     the app other people actually see. */
+  overflow-wrap: anywhere;
 }
 
 .sheet h2 {
@@ -1023,6 +1229,68 @@ select {
   background: #14161A;
   border-radius: 3px;
   padding: 5px 9px;
+  white-space: nowrap;
+}
+
+/* ---- setlist view ----
+   The preview for the Setlist pill. Set larger and looser than the sheet
+   because the document it stands in for gets read from a stand, not studied
+   at a desk — and a preview that doesn't look like the output is not much of
+   a preview. */
+.setlist { margin-top: 6px; }
+
+.slrow {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 0;
+  border-bottom: 1px solid #E4E8EB;
+}
+
+.slrow:last-child { border-bottom: 0; }
+
+.slrow__no {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 17px;
+  font-weight: 700;
+  color: #9AA3AC;
+  text-align: right;
+}
+
+.slrow__main { min-width: 0; }
+
+.slrow__title {
+  font-family: var(--font-display);
+  margin: 0;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.slrow__who {
+  margin-top: 2px;
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #66707B;
+}
+
+.slrow__key {
+  font-family: var(--font-data);
+  font-size: 17px;
+  font-weight: 800;
+  color: #0E7A57;
+  background: #E8F7F0;
+  border-radius: 6px;
+  padding: 5px 11px;
+  min-width: 3.4ch;
+  text-align: center;
   white-space: nowrap;
 }
 
@@ -1185,9 +1453,22 @@ select {
   flex-wrap: wrap;
   gap: 4px 18px;
   margin: 9px 0 0;
+  min-width: 0;
 }
 
-.srow__roles div { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+/* nowrap keeps a role and its name together, which is right — but on its own
+   it also let one long name ("Somebody With A Long Name") set the width of
+   the whole sheet and scroll the entire page sideways on a 320px phone. The
+   pair may now wrap internally as a last resort; the label still never
+   splits from its name mid-word. */
+.srow__roles div {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  min-width: 0;
+  max-width: 100%;
+}
 
 .srow__roles dt {
   font-family: var(--font-data);
@@ -1199,7 +1480,7 @@ select {
   white-space: nowrap;
 }
 
-.srow__roles dd { margin: 0; font-size: 13.5px; font-weight: 600; }
+.srow__roles dd { margin: 0; font-size: 13.5px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 
 .srow__ref {
   margin-top: 7px;
@@ -1232,7 +1513,7 @@ select {
   /* without this the tinted element rows and chart panels print white */
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 
-  .topbar, .noprint, .modal, .toast, .update { display: none !important; }
+  .topbar, .noprint, .modal, .toast { display: none !important; }
   .view { display: none !important; }
   #view-sheet.is-active { display: block !important; }
 
@@ -1242,6 +1523,10 @@ select {
   .sheet h2 { font-size: 20pt; }
   .srow { grid-template-columns: 54px 1fr; padding: 10px 0; }
   .srow__title { font-size: 12.5pt; }
+
+  .slrow { padding: 8pt 0; break-inside: avoid; page-break-inside: avoid; }
+  .slrow__title { font-size: 14pt; }
+  .slrow__key { font-size: 13pt; }
 
   /* A fixed footer repeats on every printed page, so page two of a long
      service still says whose sheet it is and which Sunday. */

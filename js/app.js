@@ -36,7 +36,13 @@
     keys:   { label: 'Keys / MD',      key: 1, capo: 1, meter: 1, bpm: 1, tone: 1, chords: 1, numbers: 1, arrangement: 1, transition: 1, roles: 1, firstLine: 0, ref: 1, clock: 1 },
     band:   { label: 'Band',           key: 1, capo: 1, meter: 1, bpm: 1, tone: 0, chords: 1, numbers: 1, arrangement: 1, transition: 1, roles: 1, firstLine: 0, ref: 1, clock: 1 },
     vocals: { label: 'Vocals',         key: 1, capo: 0, meter: 0, bpm: 1, tone: 0, chords: 0, numbers: 0, arrangement: 1, transition: 1, roles: 1, firstLine: 1, ref: 1, clock: 1 },
-    media:  { label: 'Media & sound',  key: 1, capo: 0, meter: 0, bpm: 0, tone: 0, chords: 0, numbers: 0, arrangement: 0, transition: 0, roles: 0, firstLine: 1, ref: 0, clock: 1 }
+    media:  { label: 'Media & sound',  key: 1, capo: 0, meter: 0, bpm: 0, tone: 0, chords: 0, numbers: 0, arrangement: 0, transition: 0, roles: 0, firstLine: 1, ref: 0, clock: 1 },
+
+    /* The setlist is not the sheet with fields switched off — it is a
+       different document with its own layout, so it carries a `setlist` flag
+       rather than a row of zeroes. renderSheet() and the exporters both branch
+       on it. Elements are dropped and the songs renumber from 1. */
+    setlist: { label: 'Setlist', setlist: 1, key: 1, capo: 0, meter: 0, bpm: 0, tone: 0, chords: 0, numbers: 0, arrangement: 0, transition: 0, roles: 1, firstLine: 0, ref: 0, clock: 0 }
   };
 
   var state = {
@@ -138,7 +144,7 @@
      would otherwise cost the user a second Back press that appeared to do
      nothing.
      ============================================================ */
-  var PARENT = { sets: null, songs: null, editor: 'sets', live: 'editor', sheet: 'editor' };
+  var PARENT = { sets: null, songs: null, editor: 'sets', live: 'editor', sheet: 'editor', import: 'sets' };
   var ignorePop = false;      // set when WE caused the popstate
   var modalPushed = false;    // an open sheet owns a history entry
 
@@ -149,23 +155,27 @@
     show(view);
   }
 
-  var updatePending = false;
+  /* Updates are applied silently — see applyUpdateIfIdle() near the bottom.
+     There is no longer a banner asking permission: it sat over the bottom of
+     every screen, it appeared on the one morning nobody wants to read a
+     dialog, and "reload" is not a decision a musician should have to make
+     mid-service. The worker waits instead until you are back on a list screen
+     with nothing open, then swaps itself in. */
+  var pendingWorker = null;
 
   UI.onOpen = function () {
     history.pushState({ modal: true, v: state.view }, '');
     modalPushed = true;
-    // Belt and braces alongside the z-index: an update prompt floating over an
-    // open sheet is clutter even when it is not intercepting taps.
-    if (updatePending) $('updateBar').hidden = true;
   };
 
   UI.onClosed = function () {
-    if (updatePending) $('updateBar').hidden = false;
     // Save/Cancel closed the sheet: retire the history entry it pushed.
-    if (!modalPushed) return;
-    modalPushed = false;
-    ignorePop = true;
-    history.back();
+    if (modalPushed) {
+      modalPushed = false;
+      ignorePop = true;
+      history.back();
+    }
+    applyUpdateIfIdle();
   };
 
   window.addEventListener('popstate', function (e) {
@@ -175,13 +185,17 @@
     if (UI.isOpen()) {
       modalPushed = false;
       UI.closeSilent();
-      if (updatePending) $('updateBar').hidden = false;
+      applyUpdateIfIdle();
       return;
     }
 
     var target = (e.state && e.state.v) || 'sets';
     if (target === 'live' || target === 'sheet') target = PARENT[target] || 'sets';
     if (target === 'editor' && !state.set) target = 'sets';
+    // A review screen with nothing in it is a dead end: the rows live in
+    // memory only, so coming back to it after leaving would show an empty
+    // list with a Create button that does nothing.
+    if (target === 'import' && !importRows.length) target = 'sets';
 
     if (target === 'editor') renderEditor();
     if (target === 'sets') { loadSets().then(renderSets); }
@@ -189,16 +203,16 @@
   });
 
   /* ---------------- view switching ---------------- */
-  var DEPTH = { sets: 0, songs: 0, editor: 1, sheet: 2, live: 2 };
+  var DEPTH = { sets: 0, songs: 0, import: 1, editor: 1, sheet: 2, live: 2 };
 
   function show(view) {
     var back = DEPTH[view] < DEPTH[state.view];
     state.view = view;
-    ['sets', 'songs', 'editor', 'live', 'sheet'].forEach(function (v) {
+    ['sets', 'songs', 'editor', 'live', 'sheet', 'import'].forEach(function (v) {
       $('view-' + v).classList.toggle('is-active', v === view);
     });
 
-    var deep = view === 'editor' || view === 'live' || view === 'sheet';
+    var deep = view === 'editor' || view === 'live' || view === 'sheet' || view === 'import';
     $('btnBack').hidden = !deep;
     $('topNav').hidden = deep;
     $('topMark').hidden = deep;
@@ -208,6 +222,7 @@
     if (view === 'songs') $('topTitle').textContent = 'Song library';
     if (view === 'editor') $('topTitle').textContent = state.set ? fmtDate(state.set.date) : 'Service';
     if (view === 'sheet') $('topTitle').textContent = 'Sheet';
+    if (view === 'import') $('topTitle').textContent = 'Check the list';
 
     document.querySelectorAll('.tab[data-view]').forEach(function (t) {
       t.classList.toggle('is-active', t.getAttribute('data-view') === view);
@@ -221,6 +236,11 @@
     pane.classList.add(back ? 'anim-back' : 'anim-in');
 
     window.scrollTo(0, 0);
+
+    // Back on a list screen with nothing open is the safe moment to swap in a
+    // waiting build. Never mid-service, never mid-edit.
+    applyUpdateIfIdle();
+
     if (view === 'live') {
       lockScreen();
     } else {
@@ -965,6 +985,48 @@
   $('btnSheetBack').addEventListener('click', goUp);
   $('btnPrint').addEventListener('click', function () { window.print(); });
 
+  /* Generating a few pages takes a beat on a cheap tablet, so the button says
+     so rather than appearing to have missed the tap — which is exactly how the
+     old silent window.print() failure read. */
+  /* What you are looking at is what gets saved. The pill picks the document;
+     these buttons only pick the format. Reaching for the model here rather
+     than at bind time means switching pills needs no rewiring. */
+  function currentModel() {
+    var V = SHEET_VIEWS[state.sheetView] || SHEET_VIEWS.full;
+    return V.setlist ? setlistModel() : sheetModel();
+  }
+
+  function runExport(btn, job, label) {
+    if (btn.disabled) return;
+    var original = btn.innerHTML;
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+
+    // Yield a frame so the label actually paints before we block on layout.
+    setTimeout(function () {
+      Promise.resolve().then(function () {
+        return job(currentModel());
+      }).then(function (res) {
+        UI.toast(label + ' saved to ' + ((res && res.where) || 'your device'));
+        haptic(HAPTIC.done);
+      }).catch(function () {
+        UI.toast("Couldn't save the " + label + ' — try Print instead');
+        haptic(HAPTIC.warn);
+      }).then(function () {
+        btn.disabled = false;
+        btn.innerHTML = original;
+      });
+    }, 30);
+  }
+
+  $('btnPdf').addEventListener('click', function () {
+    runExport(this, Exporter.pdf, 'PDF');
+  });
+
+  $('btnDocx').addEventListener('click', function () {
+    runExport(this, Exporter.docx, 'Word document');
+  });
+
   $('sheetViews').addEventListener('click', function (e) {
     var b = e.target.closest('[data-sv]');
     if (!b) return;
@@ -982,6 +1044,11 @@
     var s = state.set;
     var items = s.items || [];
     var V = SHEET_VIEWS[state.sheetView] || SHEET_VIEWS.full;
+
+    // A different document, so a different renderer — not this one with most
+    // of its branches turned off.
+    if (V.setlist) return renderSetlistSheet();
+
     var total = totalMinutes(items);
     var ends = items.length ? clockFor(items, items.length, s.startTime) : null;
     var songs = items.filter(isSong);
@@ -1095,6 +1162,475 @@
       '</footer>';
   }
 
+
+  /* The same service, described as data rather than markup, for the PDF and
+     Word writers in js/export.js. It runs through the identical SHEET_VIEWS
+     filter the on-screen sheet uses, so what you saved is what you were
+     looking at — including which pill was selected. Building it from state
+     rather than scraping the rendered DOM keeps the documents honest even if
+     the sheet markup changes. */
+  function sheetModel() {
+    var s = state.set;
+    var items = s.items || [];
+    var V = SHEET_VIEWS[state.sheetView] || SHEET_VIEWS.full;
+    var total = totalMinutes(items);
+    var ends = items.length ? clockFor(items, items.length, s.startTime) : null;
+    var songs = items.filter(isSong);
+
+    var stats = [
+      { value: String(songs.length), label: songs.length === 1 ? 'song' : 'songs' },
+      { value: String(items.length), label: 'items' },
+      { value: String(total), label: 'min' }
+    ];
+    if (ends && ends.isClock) stats.push({ value: ends.label, label: 'finish' });
+
+    var journey = V.key ? songs.map(function (x) { return x.key; }).filter(Boolean) : [];
+
+    var rows = items.map(function (it, idx) {
+      var clock = clockFor(items, idx, s.startTime);
+      var row = {
+        kind: isSong(it) ? 'song' : 'element',
+        clock: V.clock ? clock.label : '',
+        no: String(idx + 1).padStart(2, '0'),
+        title: it.title || (isSong(it) ? 'Untitled' : 'Element'),
+        minutes: it.minutes ? it.minutes + ' min' : '',
+        roles: V.roles ? (it.roles || []) : []
+      };
+
+      if (!isSong(it)) {
+        row.by = it.kind || '';
+        row.arrangement = V.arrangement ? (it.notes || '') : '';
+        return row;
+      }
+
+      var meta = [];
+      if (V.meter && it.meter) meta.push(it.meter);
+      if (V.bpm && it.bpm) meta.push(it.bpm + ' bpm');
+      if (V.capo && it.capo) {
+        var shapes = Chords.shapesKey(it.key, it.capo);
+        meta.push('capo ' + it.capo + (shapes ? ' \u2192 play ' + shapes : ''));
+      }
+      if (V.tone && it.tone) meta.push(it.tone);
+
+      var by = [];
+      if (it.artist) by.push(it.artist);
+      if (it.segment) by.push(it.segment);
+
+      row.key = V.key ? (it.key || '\u2014') : '';
+      row.by = by.join(' \u00B7 ');
+      row.meta = meta.join(' \u00B7 ');
+      row.firstLine = V.firstLine ? (it.firstLine || '') : '';
+      row.arrangement = V.arrangement ? (it.arrangement || '') : '';
+      row.transition = V.transition ? (it.transition || '') : '';
+      row.ref = V.ref ? (it.refLink || '') : '';
+
+      if (V.chords && it.chords) {
+        var names = Chords.toNames(it.chords, it.key);
+        var both = V.numbers && Chords.hasNumbers(it.chords) && it.key && names !== it.chords;
+        row.chart = both ? names : it.chords;
+        row.chartAlt = both ? it.chords : '';
+      }
+      return row;
+    });
+
+    var service = s.service || 'Sunday service';
+    return {
+      title: service,
+      viewLabel: V.label,
+      eyebrow: fmtDate(s.date) + (s.startTime ? ' \u00B7 starts ' + s.startTime : ''),
+      dateSlug: s.date || '',
+      docTitle: service + ' \u2014 ' + V.label,
+      runner: service + ' \u00B7 ' + fmtDate(s.date) + ' \u00B7 ' + V.label,
+      notes: s.notes || '',
+      stats: stats,
+      journey: journey.join(' \u2192 '),
+      rows: rows
+    };
+  }
+
+  /* The setlist is a different question from the sheet: not "what is in this
+     service" but "what are we singing, in what key, and who takes it". So it
+     drops the elements entirely and renumbers — the fourth item in the service
+     might be the second song, and on this document it is song 2. It also
+     ignores the view pills, because a setlist is the same for everybody. */
+  function singerFor(item) {
+    var roles = item.roles || [];
+    var lead = roles.filter(function (r) {
+      return /^(lead vocal|leads it)$/i.test(r.role);
+    });
+    // Nobody marked as leading it: fall back to any other voice on the song
+    // rather than printing a blank where a name should be.
+    if (!lead.length) {
+      lead = roles.filter(function (r) { return /vocal|bgv|sing/i.test(r.role); });
+    }
+    return lead.filter(function (r) { return r.person; });
+  }
+
+  function setlistModel() {
+    var s = state.set;
+    var picked = (s.items || []).filter(isSong).map(function (it, i) {
+      var voices = singerFor(it);
+      return {
+        no: String(i + 1),
+        title: it.title || 'Untitled',
+        key: it.key || '',
+        singer: voices.map(function (r) { return r.person; }).join(', '),
+        roles: voices
+      };
+    });
+
+    var service = s.service || 'Sunday service';
+    return {
+      /* The flag the PDF writer branches on. Word doesn't need one: the
+         generic table renderer already produces a clean setlist when the rows
+         only carry a number, a title, a key and a name. */
+      layout: 'setlist',
+      title: service,
+      viewLabel: 'Setlist',
+      eyebrow: fmtDate(s.date) + (s.startTime ? ' \u00B7 starts ' + s.startTime : ''),
+      dateSlug: s.date || '',
+      docTitle: service + ' \u2014 Setlist',
+      runner: service + ' \u00B7 ' + fmtDate(s.date) + ' \u00B7 Setlist',
+      notes: '',
+      journey: '',
+      stats: [{ value: String(picked.length), label: picked.length === 1 ? 'song' : 'songs' }],
+      songs: picked,
+      rows: picked.map(function (song) {
+        return {
+          kind: 'song',
+          clock: '',
+          no: song.no,
+          title: song.title,
+          key: song.key,
+          minutes: '',
+          roles: song.roles
+        };
+      })
+    };
+  }
+
+  /* Exposed deliberately: the test suite asserts on the exact data the
+     documents are built from, and on a support call `SetTheSet.sheetModel()`
+     in a console answers "what would this actually print" without saving a
+     file to somebody's phone. */
+  window.SetTheSet = { sheetModel: sheetModel, setlistModel: setlistModel };
+
+  /* The on-screen setlist. Deliberately the same shape as the PDF the Save
+     button produces, so what you check here is what the singers get — the
+     whole point of being able to look at it first. */
+  function renderSetlistSheet() {
+    var s = state.set;
+    var model = setlistModel();
+
+    var rows = model.songs.map(function (song) {
+      return '<section class="slrow">' +
+        '<span class="slrow__no">' + esc(song.no) + '</span>' +
+        '<div class="slrow__main">' +
+          '<h3 class="slrow__title">' + esc(song.title) + '</h3>' +
+          (song.singer ? '<div class="slrow__who">' + esc(song.singer) + '</div>' : '') +
+        '</div>' +
+        (song.key ? '<span class="slrow__key">' + esc(song.key) + '</span>' : '') +
+      '</section>';
+    }).join('');
+
+    $('sheet').innerHTML =
+      '<header class="sheet__masthead">' +
+        '<img class="sheet__mark" src="resources/mark.svg" alt="" width="46" height="46">' +
+        '<div class="sheet__id">' +
+          '<div class="sheet__eyebrow">' + esc(model.eyebrow) + '</div>' +
+          '<h2>' + esc(s.service || 'Sunday service') + '</h2>' +
+        '</div>' +
+        '<div class="sheet__for">Setlist</div>' +
+      '</header>' +
+
+      '<div class="setlist">' +
+        (rows || '<p class="sheet__note">No songs in this service yet.</p>') +
+      '</div>' +
+
+      '<footer class="sheet__runner">' + esc(model.runner) + '</footer>';
+  }
+
+
+  /* ============================================================
+     IMPORT — a written list becomes a service
+
+     Three stages, deliberately separate: get some text (typed, pasted, or
+     read off a photo), let the user correct it, then build the service. The
+     middle stage is not optional and not skippable. OCR on handwriting is
+     good enough to save typing and nowhere near good enough to trust, so the
+     value here is in the correction screen, not the camera.
+     ============================================================ */
+  var importRows = [];
+
+  function ocrPlugin() {
+    var p = (window.Capacitor && window.Capacitor.Plugins) || {};
+    return p.Ocr || p.TextRecognition || null;
+  }
+
+  function cameraPlugin() {
+    var p = (window.Capacitor && window.Capacitor.Plugins) || {};
+    return p.Camera || null;
+  }
+
+  $('btnImport').addEventListener('click', function () {
+    var canScan = !!(ocrPlugin() && cameraPlugin());
+
+    UI.open({
+      title: 'Build from a written list',
+      fields: [
+        { name: 'text', label: 'One song per line', type: 'textarea', rows: 8,
+          placeholder: '1. Way Maker - Ab - Thandi\n2. Goodness of God (C)\n3. Every Praise / Bb / Musa' }
+      ],
+      extraHTML:
+        (canScan
+          ? '<button class="btn btn--ghost btn--block" id="btnScan" type="button">Scan a photo instead</button>'
+          : '<p class="hint">Scanning a photo needs the camera build of the app. ' +
+            'Typing or pasting the list works the same way from here.</p>') +
+        '<p class="hint">Keys and names are optional \u2014 anything already in your ' +
+        'song library gets filled in automatically. You can fix everything on the next screen.</p>',
+      saveLabel: 'Read the list',
+      onOpen: function () {
+        var scan = document.getElementById('btnScan');
+        if (scan) scan.onclick = function () { scanPhoto(); };
+      },
+      onSave: function (v) {
+        if (!clean(v.text)) { haptic(HAPTIC.warn); UI.toast('Paste or type the list first'); return false; }
+        enterReview(v.text);
+        return false;   // enterReview already closed the sheet, history and all
+      }
+    });
+  });
+
+  function clean(s) { return String(s == null ? '' : s).trim(); }
+
+  /* The camera path. Both plugins are optional — in a browser, or in an APK
+     built before they were added, the button simply never appears rather than
+     failing when it is tapped. */
+  function scanPhoto() {
+    var Camera = cameraPlugin();
+    var Ocr = ocrPlugin();
+    if (!Camera || !Ocr) { UI.toast('Scanning is not available in this build'); return; }
+
+    UI.toast('Opening the camera…');
+    Camera.getPhoto({ quality: 90, resultType: 'uri', source: 'CAMERA', correctOrientation: true })
+      .then(function (photo) {
+        UI.toast('Reading the page…');
+        var image = photo.path || photo.webPath || photo.dataUrl;
+        return Ocr.process ? Ocr.process({ image: image })
+                           : Ocr.detectText({ filename: image });
+      })
+      .then(function (res) {
+        var text = ocrText(res);
+        if (!clean(text)) {
+          haptic(HAPTIC.warn);
+          UI.toast('Nothing readable on that photo — try better light');
+          return;
+        }
+        enterReview(text);
+      })
+      .catch(function () {
+        haptic(HAPTIC.warn);
+        UI.toast("Couldn't read that photo — type the list instead");
+      });
+  }
+
+  /* Different OCR plugins hand back different shapes. Take whichever one this
+     build happens to have rather than pinning to a single plugin's API. */
+  function ocrText(res) {
+    if (!res) return '';
+    if (typeof res === 'string') return res;
+    if (res.text) return res.text;
+    if (res.textDetections) {
+      return res.textDetections.map(function (d) { return d.text; }).join('\n');
+    }
+    if (res.blocks) {
+      return res.blocks.map(function (b) { return b.text; }).join('\n');
+    }
+    return '';
+  }
+
+  /* Entering the review screen from inside a bottom sheet needs care.
+
+     The obvious version — navTo('import') from onSave, then let the sheet
+     close normally — pushes the review screen and then immediately has the
+     sheet's own close handler call history.back() to retire ITS entry, which
+     swallows the entry the review screen just pushed. Back then still worked
+     by luck, but the history said 'sets' while the screen said 'import', and
+     the stack was one entry short.
+
+     So the sheet's entry is REPLACED by the review screen's rather than
+     stacked on top of it: one screen in, one Back out. */
+  function enterReview(text) {
+    var rows = SetImport.parse(text, state.songs);
+
+    modalPushed = false;        // we are retiring the sheet's entry ourselves
+    UI.closeSilent();
+    history.replaceState({ v: 'import' }, '');
+
+    importRows = rows;
+    renderImport();
+    show('import');
+  }
+
+  function renderImport() {
+    var host = $('importList');
+    var usable = importRows.filter(function (r) { return r.include; });
+    var flagged = usable.filter(function (r) { return r.needsKey || r.needsCheck; }).length;
+
+    $('importEmpty').hidden = importRows.length > 0;
+    $('importSummary').textContent = importRows.length
+      ? usable.length + (usable.length === 1 ? ' item' : ' items') +
+        (flagged ? ' \u00B7 ' + flagged + ' to check' : ' \u00B7 all matched')
+      : '';
+
+    host.innerHTML = '';
+
+    importRows.forEach(function (row, idx) {
+      var li = document.createElement('li');
+      li.className = 'item improw' +
+        (row.include ? '' : ' improw--out') +
+        (row.element ? ' item--element' : '');
+
+      var tag = row.element
+        ? '<span class="improw__tag">Element</span>'
+        : (row.songId
+            ? '<span class="improw__tag improw__tag--ok">In library</span>'
+            : '<span class="improw__tag improw__tag--new">New song</span>');
+
+      li.innerHTML =
+        '<div class="improw__top">' +
+          '<span class="improw__no">' + (idx + 1) + '</span>' +
+          tag +
+          '<button class="improw__drop" type="button" data-drop="' + idx + '">' +
+            (row.include ? 'Skip' : 'Include') + '</button>' +
+        '</div>' +
+
+        // The line as it was read, kept visible. When a title is wrong this is
+        // the only way to tell what it was meant to say without the paper.
+        (row.raw && row.raw !== row.title
+          ? '<div class="improw__raw">read: ' + esc(row.raw) + '</div>' : '') +
+
+        '<label class="field">' +
+          '<span class="field__label">Title</span>' +
+          '<input type="text" data-f="title" data-i="' + idx + '" value="' + esc(row.title) + '">' +
+        '</label>' +
+
+        (row.element ? '' :
+          '<div class="field__pair">' +
+            '<label class="field">' +
+              '<span class="field__label' + (row.needsKey ? ' field__label--warn' : '') + '">' +
+                'Key' + (row.needsKey ? ' \u2014 not on the paper' : '') + '</span>' +
+              '<select data-f="key" data-i="' + idx + '">' + keyOptions(row.key) + '</select>' +
+            '</label>' +
+            '<label class="field">' +
+              '<span class="field__label">Who leads it</span>' +
+              '<input type="text" data-f="singer" data-i="' + idx + '" value="' + esc(row.singer) + '">' +
+            '</label>' +
+          '</div>');
+
+      host.appendChild(li);
+    });
+  }
+
+  function keyOptions(selected) {
+    return KEYS.map(function (k) {
+      return '<option value="' + esc(k.value) + '"' +
+        (k.value === selected ? ' selected' : '') + '>' + esc(k.label) + '</option>';
+    }).join('');
+  }
+
+  $('importList').addEventListener('input', function (e) {
+    var node = e.target.closest('[data-f]');
+    if (!node) return;
+    var row = importRows[+node.getAttribute('data-i')];
+    var field = node.getAttribute('data-f');
+    row[field] = node.value;
+    if (field === 'key') row.needsKey = !node.value;
+    // Editing a title by hand means it is no longer whatever the camera saw.
+    if (field === 'title') { row.songId = null; row.needsCheck = false; }
+  });
+
+  $('importList').addEventListener('change', function (e) {
+    var node = e.target.closest('select[data-f]');
+    if (!node) return;
+    var row = importRows[+node.getAttribute('data-i')];
+    row.key = node.value;
+    row.needsKey = !node.value;
+    renderImport();
+  });
+
+  $('importList').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-drop]');
+    if (!btn) return;
+    var row = importRows[+btn.getAttribute('data-drop')];
+    row.include = !row.include;
+    renderImport();
+  });
+
+  $('btnImportCancel').addEventListener('click', function () {
+    UI.confirm({
+      title: 'Discard this list?',
+      message: 'Nothing has been saved yet.',
+      confirmLabel: 'Discard',
+      onConfirm: function () { importRows = []; navTo('sets'); }
+    });
+  });
+
+  $('btnImportCreate').addEventListener('click', function () {
+    var keep = importRows.filter(function (r) { return r.include && clean(r.title); });
+    if (!keep.length) { haptic(HAPTIC.warn); UI.toast('Nothing to add'); return; }
+
+    var set = {
+      id: DB.newId(),
+      date: nextSunday(),
+      service: 'Sunday service',
+      startTime: '10:00',
+      notes: '',
+      items: keep.map(function (row) {
+        if (row.element) {
+          return { id: DB.newId(), type: 'element', kind: 'Other',
+                   title: clean(row.title), minutes: '5', notes: '', roles: [], performed: false };
+        }
+
+        var lib = row.songId && state.songs.find(function (s) { return s.id === row.songId; });
+        var item = {
+          id: DB.newId(), type: 'song', songId: row.songId || null,
+          title: clean(row.title), key: row.key || '', segment: 'Praise',
+          artist: '', capo: '', meter: '', bpm: '', minutes: '5',
+          tone: '', chords: '', arrangement: '', transition: '', firstLine: '', refLink: '',
+          roles: [], performed: false
+        };
+
+        /* A matched song brings last time's work with it — chart, tempo,
+           patches. That is the real payoff of the library match: the paper
+           only ever had a title and a key on it. */
+        if (lib) {
+          ['artist', 'capo', 'meter', 'bpm', 'minutes', 'tone', 'chords',
+           'arrangement', 'firstLine', 'refLink'].forEach(function (f) {
+            item[f] = lib[f] || item[f];
+          });
+          if (!item.key) item.key = lib.key || '';
+        }
+
+        if (clean(row.singer)) {
+          item.roles = [{ role: 'Lead vocal', person: clean(row.singer) }];
+        }
+        return item;
+      })
+    };
+
+    DB.put('setlists', set)
+      .then(loadSets)
+      .then(function () {
+        importRows = [];
+        state.setId = set.id;
+        state.set = set;
+        renderEditor();
+        navTo('editor');
+        UI.toast(set.items.length + ' items added — check the details');
+        haptic(HAPTIC.done);
+      });
+  });
 
   /* ============================================================
      FIRST RUN + HELP
@@ -1241,6 +1777,24 @@
      "the script's bytes differ", which fires for whitespace/comment-only
      diffs too and produces a banner with nothing behind it. Resolves null
      if the worker doesn't answer in time rather than hanging forever. */
+  /* The whole update policy, in one function.
+
+     A new build reloads the page, which is why it can never be allowed to
+     happen while something is in flight. So it waits for all three of: no
+     sheet open, no unsaved editor screen, and not running a service. On the
+     Sunday-morning screen the app will simply never update — which is
+     correct. The swap happens next time you're back on the list, or on the
+     next cold start, and nobody is ever asked about it. */
+  function applyUpdateIfIdle() {
+    if (!pendingWorker) return;
+    if (UI.isOpen()) return;
+    if (state.view !== 'sets' && state.view !== 'songs') return;
+
+    var worker = pendingWorker;
+    pendingWorker = null;
+    try { worker.postMessage({ type: 'SKIP_WAITING' }); } catch (e) { pendingWorker = worker; }
+  }
+
   function swVersion(worker) {
     return new Promise(function (resolve) {
       if (!worker) { resolve(null); return; }
@@ -1266,14 +1820,12 @@
                 swVersion(navigator.serviceWorker.controller)
               ]).then(function (v) {
                 var incomingVersion = v[0], currentVersion = v[1];
-                // Only nag when we can positively confirm the build changed.
+                // Only act when we can positively confirm the build changed.
                 // If both answered and they match, this is a no-op rebuild
-                // (e.g. only comments/whitespace changed) — say nothing.
+                // (e.g. only comments/whitespace changed) — do nothing.
                 if (incomingVersion && currentVersion && incomingVersion === currentVersion) return;
-                updatePending = true;
-                // never surface it over an open sheet
-                $('updateBar').hidden = UI.isOpen();
-                $('btnUpdate').onclick = function () { incoming.postMessage({ type: 'SKIP_WAITING' }); };
+                pendingWorker = incoming;
+                applyUpdateIfIdle();
               });
             }
           });

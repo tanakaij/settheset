@@ -102,6 +102,33 @@
     return out;
   }
 
+  /* Keep --vvh / --vvtop in step with what is actually visible.
+
+     The Android soft keyboard shrinks the VISUAL viewport and leaves the
+     layout viewport alone. A bottom sheet sized off the layout viewport
+     therefore keeps its full height when the keyboard opens and pushes its own
+     Cancel/Save bar off the bottom of the screen — the sheet looks like it has
+     no way to save, on exactly the screens (chart, arrangement) where the
+     keyboard is always open. visualViewport is the only thing that reports
+     this correctly. Browsers without it fall back to innerHeight, which is
+     what the layout was assuming anyway, so nothing regresses. */
+  function syncViewport() {
+    var vv = global.visualViewport;
+    var height = vv ? vv.height : global.innerHeight;
+    var top = vv ? vv.offsetTop : 0;
+    if (!height) return;
+    var root = document.documentElement;
+    root.style.setProperty('--vvh', height + 'px');
+    root.style.setProperty('--vvtop', top + 'px');
+  }
+
+  if (global.visualViewport) {
+    global.visualViewport.addEventListener('resize', syncViewport);
+    global.visualViewport.addEventListener('scroll', syncViewport);
+  }
+  global.addEventListener('resize', syncViewport);
+  syncViewport();
+
   /* silent=true skips the onClosed hook. The app uses that hook to keep the
      browser/hardware Back button in step with the sheet, and a close that was
      ITSELF caused by Back must not push another history change. */
@@ -155,8 +182,20 @@
 
     if (opts.onOpen) opts.onOpen(el('modalBody'));
 
+    syncViewport();
+
     var first = el('modalBody').querySelector('input, select, textarea');
-    if (first && opts.autofocus !== false) setTimeout(function () { first.focus(); }, 60);
+    if (first && opts.autofocus !== false) {
+      setTimeout(function () {
+        first.focus();
+        // The keyboard animates in after focus, so re-measure once it has
+        // settled and make sure the field it opened for is actually visible.
+        setTimeout(function () {
+          syncViewport();
+          if (first.scrollIntoView) first.scrollIntoView({ block: 'nearest' });
+        }, 260);
+      }, 60);
+    }
   }
 
   el('modalSave').addEventListener('click', function () {

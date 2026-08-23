@@ -55,3 +55,95 @@ bare "App not installed".
 The workflow runs `npm test` before it builds. A red test means no APK. That is
 deliberate: a broken APK installs over a working one, and you find out about it
 on a Sunday morning.
+
+## Saving PDFs and Word documents
+
+The Sheet screen writes real files rather than calling `window.print()`. That
+change was forced by the APK: Capacitor's WebView has no print handler wired
+up, so `window.print()` did nothing at all — the button flashed and no file was
+ever produced. `js/export.js` now generates the PDF and the `.docx` itself,
+offline, with no library and no network.
+
+Writing them to `Documents/SetTheSet/` needs one plugin:
+
+```
+npm install @capacitor/filesystem
+npx cap sync android
+```
+
+`@capacitor/share` is optional and only powers the "open it now" prompt after a
+save. Without it the file is still written; you just have to go and find it.
+
+Both are already in `package.json`, so CI picks them up from `npm install`.
+Capacitor's native bridge exposes them at `window.Capacitor.Plugins.Filesystem`
+automatically — no import or bundler step, same as KeepAwake.
+
+If the plugin is missing at runtime, the export falls back to an ordinary blob
+download, which inside a WebView lands in the system **Downloads** folder
+instead of `Documents/SetTheSet`. That fallback is silent by design, so if
+files are showing up in the wrong place, a missing plugin is the first thing to
+check.
+
+On Android 10 and below, writing to the public Documents folder needs a storage
+permission; the export requests it and walks down a fallback chain
+(`DOCUMENTS` → `EXTERNAL_STORAGE` → `EXTERNAL` → app storage) if it is refused,
+so a save never simply fails.
+
+## Updates
+
+There is no "a new version is ready" banner any more. A waiting service worker
+is held and swapped in silently once the user is back on the Sets or Songs list
+with no sheet open — never mid-edit, and never during a service. Bump
+`CACHE_VERSION` in `settheset-sw.js` whenever you change `index.html`, `css/`
+or `js/`, exactly as before; the only thing that changed is that nobody gets
+asked about it.
+
+## Building a service from a written list
+
+The Sets screen has **Build from a written list**. It takes a block of text —
+typed, pasted, or read off a photo — and turns it into a reviewable draft
+service. `js/import.js` does the parsing and the fuzzy match against the song
+library; it has no dependencies and is covered by `tests/import.test.js`.
+
+Two plugins power the camera path:
+
+```
+npm install @capacitor/camera @jcesarmobile/capacitor-ocr
+npx cap sync android
+```
+
+Both are in `package.json`, so CI installs them. The OCR plugin does
+recognition **on the device** — no network, no API key, no per-scan cost,
+which is the only kind of scanning that is any use in a hall with no signal.
+
+If either plugin is missing at runtime, the "Scan a photo instead" button
+simply does not render and the paste/type path still works. That is why the
+feature is safe to ship ahead of the plugins landing, and why it works
+unchanged in the browser build on GitHub Pages.
+
+### What to expect from the accuracy
+
+ML Kit and Apple Vision are built for **printed** text. A typed or printed
+sheet reads well. Neat block capitals are variable. Cursive is poor. Google's
+handwriting model (Digital Ink Recognition) only works from stylus strokes,
+not from a photograph, so there is no on-device option that reads handwriting
+properly today.
+
+The feature is designed around that rather than pretending otherwise:
+
+- **Nothing goes straight into a service.** The review screen is mandatory,
+  every field is editable, and the line as it was read stays visible above it.
+- **The library does the heavy lifting.** A title only has to be *close* —
+  "Goodnes of God" matches at 0.92 — and a match brings last time's key, BPM,
+  chart and arrangement with it. The paper only ever had a title and a key.
+- **Keys are never assumed.** A song with no key is flagged in red. The key
+  parser deliberately rejects anything ambiguous (`E5`, `G run`) rather than
+  guessing, because a wrong key is worse than a blank one: the blank gets
+  caught at rehearsal, the wrong one gets caught in front of the congregation.
+- **Only the accidental position is auto-corrected** for OCR lookalikes
+  (`B6` → `Bb`, `8b` → `Bb`). A `6` in a song title stays a six.
+
+If scan quality turns out to be the bottleneck, the place to improve it is a
+cloud vision model, which reads handwriting far better — but that means a
+network call, an API key inside a sideloaded APK, and a per-scan cost. That
+trade is a deliberate decision, not a default.

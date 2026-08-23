@@ -32,6 +32,9 @@
 <section class="view is-active" id="view-sets">
   <div class="stack">
     <button class="btn btn--primary btn--block" id="btnNewSet" type="button">New service</button>
+    <button class="btn btn--ghost btn--block" id="btnImport" type="button">
+      <span class="btn__ico" aria-hidden="true">LIST</span>Build from a written list
+    </button>
     <ul class="cards" id="setList"></ul>
     <div class="empty empty--first" id="setsEmpty">
       <img src="resources/mark.svg" alt="" width="64" height="64" class="empty__mark">
@@ -48,7 +51,31 @@
   </div>
 </section>
 
-<!-- ============ SONG LIBRARY ============ -->
+<!-- ============ SONG LIBRARY ============ --><section class="view" id="view-import">
+  <div class="stack">
+    <!-- Nothing here is trusted into a service. Every row is editable, and
+         the ones the parser is least sure about are flagged, because a wrong
+         key found on Sunday morning is the failure that matters. -->
+    <div class="importhead">
+      <h2 class="importhead__title">Check the list</h2>
+      <p class="importhead__sub" id="importSummary"></p>
+    </div>
+
+    <ul class="items" id="importList"></ul>
+
+    <div class="empty empty--first" id="importEmpty" hidden>
+      <h2>Nothing readable found</h2>
+      <p>Try a straighter photo in better light, or paste the list as text
+         instead. One song per line works best.</p>
+    </div>
+
+    <div class="row row--split">
+      <button class="btn btn--ghost" id="btnImportCancel" type="button">Cancel</button>
+      <button class="btn btn--primary" id="btnImportCreate" type="button">Create service</button>
+    </div>
+  </div>
+</section>
+
 <section class="view" id="view-songs">
   <div class="stack">
     <button class="btn btn--primary btn--block" id="btnNewSong" type="button">Add song to library</button>
@@ -107,9 +134,22 @@
 <!-- ============ SHEET (also the print target) ============ -->
 <section class="view" id="view-sheet">
   <div class="sheetwrap">
-    <div class="row row--split noprint">
-      <button class="btn btn--ghost" id="btnSheetBack" type="button">Back to editor</button>
-      <button class="btn btn--primary" id="btnPrint" type="button">Save as PDF</button>
+    <div class="row noprint">
+      <button class="btn btn--ghost btn--block" id="btnSheetBack" type="button">Back to editor</button>
+    </div>
+
+    <!-- window.print() does nothing inside the packaged APK's WebView, which
+         is why "Save as PDF" used to flash and produce no file. These two
+         write real documents to Documents/SetTheSet instead. Print stays for
+         desktop browsers and for anyone going straight to a paper copy. -->
+    <div class="exportbar noprint">
+      <button class="btn btn--primary" id="btnPdf" type="button">
+        <span class="btn__ico" aria-hidden="true">PDF</span>Save PDF
+      </button>
+      <button class="btn btn--ghost" id="btnDocx" type="button">
+        <span class="btn__ico" aria-hidden="true">DOC</span>Word
+      </button>
+      <button class="btn btn--ghost btn--quiet" id="btnPrint" type="button">Print</button>
     </div>
 
     <!-- Per-person views. Everyone gets the same running order; they just
@@ -120,12 +160,15 @@
       <button class="pill" data-sv="band" type="button">Band</button>
       <button class="pill" data-sv="vocals" type="button">Vocals</button>
       <button class="pill" data-sv="media" type="button">Media &amp; sound</button>
+      <button class="pill" data-sv="setlist" type="button">Setlist</button>
     </div>
 
     <article class="sheet" id="sheet"></article>
     <p class="hint noprint">
-      In the print dialog choose <strong>Save as PDF</strong> as the destination.
-      Each view prints as its own sheet, so print the ones you need one at a time.
+      Files save to <strong>Documents / SetTheSet</strong> on the phone, or to your
+      downloads in a browser. What you see below is what gets saved — switch the pill
+      and save again for the next person. <strong>Setlist</strong> is the short one:
+      songs numbered 1 up, with the key and who’s leading it, and nothing else.
     </p>
   </div>
 </section>
@@ -147,16 +190,13 @@
 
 <div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
 
-<div id="updateBar" class="update noprint" hidden>
-  <span>A new version is ready.</span>
-  <button id="btnUpdate" class="btn btn--tiny" type="button">Reload</button>
-</div>
-
 <script src="js/db.js"></script>
 <script src="js/chords.js"></script>
 <script src="js/sample.js"></script>
 <script src="js/metronome.js"></script>
 <script src="js/ui.js"></script>
+<script src="js/export.js"></script>
+<script src="js/import.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

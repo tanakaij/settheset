@@ -211,6 +211,69 @@ function check(label, cond) {
   click($('btnPrint'));
   check('print invoked', window.__printed === true);
 
+  console.log('\n— generated documents —');
+  /* The bug this guards: "Save as PDF" called window.print(), which does
+     nothing at all inside the packaged APK's WebView — a blank flash and no
+     file. These check that real bytes come out, without needing a browser. */
+  const sheetModel = window.SetTheSet.sheetModel;
+  const model = sheetModel();
+
+  check('model carries every item', model.rows.length === 3);
+  check('model carries the keys', model.rows.some(r => r.key === 'Ab'));
+  check('model carries the running clock', model.rows[0].clock === '10:00');
+
+  const pdf = window.Exporter.pdfBytes(model);
+  check('PDF has content', pdf && pdf.length > 2000);
+  const pdfHead = String.fromCharCode.apply(null, pdf.subarray(0, 8));
+  check('PDF starts with a valid header', pdfHead.indexOf('%PDF-1.4') === 0);
+  const pdfTail = String.fromCharCode.apply(null, pdf.subarray(pdf.length - 8));
+  check('PDF is terminated', pdfTail.indexOf('%%EOF') > -1);
+
+  const docx = window.Exporter.docxBytes(model);
+  check('DOCX has content', docx && docx.length > 2000);
+  check('DOCX is a ZIP', docx[0] === 0x50 && docx[1] === 0x4B);
+  const docxText = String.fromCharCode.apply(null, docx.subarray(0, 400));
+  check('DOCX declares its content types', docxText.includes('[Content_Types].xml'));
+
+  const filename = window.Exporter.filenameFor(model, 'pdf');
+  check('filename carries the service', filename.includes('Sunday morning'));
+  check('filename has no path separators', !/[\\/:*?"<>|]/.test(filename));
+
+  console.log('\n— the setlist —');
+  const setlist = window.SetTheSet.setlistModel();
+  check('setlist has songs only', setlist.songs.length === 3);
+  check('setlist numbers from 1', setlist.songs[0].no === '1');
+  check('setlist numbers run consecutively',
+    setlist.songs.map(s => s.no).join(',') === '1,2,3');
+  check('setlist carries the key', setlist.songs.some(s => s.key === 'Ab'));
+  check('setlist carries the singer', setlist.songs.some(s => s.singer === 'Thandi'));
+  check('setlist is labelled as one', setlist.viewLabel === 'Setlist');
+  check('setlist filename says setlist',
+    window.Exporter.filenameFor(setlist, 'pdf').includes('Setlist'));
+
+  const setlistPdf = window.Exporter.setlistBytes(setlist);
+  check('setlist PDF has content', setlistPdf && setlistPdf.length > 1000);
+  check('setlist PDF is a valid PDF',
+    String.fromCharCode.apply(null, setlistPdf.subarray(0, 8)).indexOf('%PDF-1.4') === 0);
+  check('setlist also exports to Word', window.Exporter.docxBytes(setlist).length > 1000);
+
+  // It has to be viewable before it is saved — that is the whole point of a
+  // preview, and the pill is the only way in.
+  click(doc.querySelector('#sheetViews [data-sv="setlist"]'));
+  await wait(60);
+  const slRows = $('sheet').querySelectorAll('.slrow');
+  check('setlist renders on screen', slRows.length === 3);
+  check('on-screen setlist is numbered',
+    [...slRows].map(r => r.querySelector('.slrow__no').textContent).join(',') === '1,2,3');
+  check('on-screen setlist shows the key', $('sheet').textContent.includes('Ab'));
+  check('on-screen setlist shows the singer', $('sheet').textContent.includes('Thandi'));
+  check('on-screen setlist drops the chart', !$('sheet').textContent.includes('| 1 - 4 |'));
+  check('on-screen setlist is labelled', $('sheet').textContent.includes('Setlist'));
+
+  click(doc.querySelector('#sheetViews [data-sv="full"]'));
+  await wait(60);
+  check('switching back restores the full sheet', $('sheet').querySelectorAll('.srow').length === 3);
+
 
   console.log('\n— running time —');
   click($('setMeta'));
