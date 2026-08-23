@@ -15,7 +15,7 @@
     "@capacitor/core": "^6.1.2",
     "@capacitor/filesystem": "^6.0.1",
     "@capacitor/share": "^6.0.2",
-    "@jcesarmobile/capacitor-ocr": "^0.3.0",
+    "@capacitor-community/image-to-text": "^6.0.1",
     "@capacitor-community/keep-awake": "^5.0.1"
   },
   "devDependencies": {

@@ -108,13 +108,38 @@ library; it has no dependencies and is covered by `tests/import.test.js`.
 Two plugins power the camera path:
 
 ```
-npm install @capacitor/camera @jcesarmobile/capacitor-ocr
+npm install @capacitor/camera @capacitor-community/image-to-text
 npx cap sync android
 ```
 
 Both are in `package.json`, so CI installs them. The OCR plugin does
-recognition **on the device** — no network, no API key, no per-scan cost,
-which is the only kind of scanning that is any use in a hall with no signal.
+recognition **on the device** (ML Kit on Android, Apple Vision on iOS) — no
+network, no API key, no per-scan cost, which is the only kind of scanning that
+is any use in a hall with no signal.
+
+### Pinning the OCR plugin to Capacitor 6
+
+Most OCR plugins have moved to Capacitor 7 or 8 peer ranges and will fail
+`npm install` here with `ERESOLVE`. This project is on Capacitor 6, so the
+version matters:
+
+| Plugin | Peer range | Usable here |
+| --- | --- | --- |
+| `@capacitor-community/image-to-text@6.0.1` | `^6.0.0` | yes |
+| `@capacitor-community/image-to-text@7+` | `>=7.0.0` | no |
+| `@jcesarmobile/capacitor-ocr` | `>=8.0.0` | no |
+| `@capacitor-mlkit/text-recognition` | `>=8.0.0` | no |
+| `@pantrist/capacitor-plugin-ml-kit-text-recognition` | `>=7.0.0` | no |
+
+Do not "fix" a resolution failure with `--legacy-peer-deps` or `--force`: it
+installs a plugin built against a different Capacitor bridge, which compiles
+and then fails at runtime on the device. Upgrade the whole project to
+Capacitor 8 deliberately, or stay on the 6.x line of the plugin.
+
+Note the plugin registers itself as **`CapacitorOcr`**, not `Ocr`. `js/app.js`
+looks under several names so a future swap needs no code change, but if you
+change plugin, check the registered name — getting it wrong makes the Scan
+button silently never appear, which looks exactly like "not installed".
 
 If either plugin is missing at runtime, the "Scan a photo instead" button
 simply does not render and the paste/type path still works. That is why the

@@ -228,6 +228,31 @@ check('the original line is retained', importJs.includes('raw:'));
 check('library matches inherit the chart',
   /lib\)\s*\{[\s\S]{0,300}'chords'/.test(appJs));
 
+console.log('\n— dependencies resolve against this Capacitor major —');
+/* This suite once passed while `npm install` itself failed with ERESOLVE: an
+   OCR plugin was added at a version whose peer range wanted Capacitor 8 while
+   the project is on 6. Tests that go green on a tree that cannot be installed
+   are worse than no tests, so the peer ranges are checked here. */
+const pkg = JSON.parse(read('package.json'));
+const deps = Object.assign({}, pkg.dependencies, pkg.devDependencies);
+const capRange = deps['@capacitor/core'] || '';
+const capMajor = parseInt(capRange.replace(/[^\d.]/g, '').split('.')[0], 10);
+check('@capacitor/core major is known', !isNaN(capMajor));
+
+for (const name of Object.keys(deps)) {
+  const meta = path.join(ROOT, 'node_modules', name, 'package.json');
+  if (!fs.existsSync(meta)) continue;   // not installed here; CI will catch it
+  const peer = (JSON.parse(fs.readFileSync(meta, 'utf8')).peerDependencies || {})['@capacitor/core'];
+  if (!peer) continue;
+  // Lowest major the peer range will accept.
+  const lowest = parseInt((peer.match(/(\d+)/) || [])[1], 10);
+  check(name + ' accepts Capacitor ' + capMajor + ' (peer ' + peer + ')',
+    !isNaN(lowest) && lowest <= capMajor);
+}
+
+check('the OCR plugin is looked up by its registered name',
+  appJs.includes('p.CapacitorOcr'));
+
 console.log('\n— android launcher assets —');
 const densities = ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi'];
 for (const d of densities) {

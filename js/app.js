@@ -1362,14 +1362,24 @@
      ============================================================ */
   var importRows = [];
 
+  /* The registered plugin name, not the name of the JS export.
+     @capacitor-community/image-to-text registers as 'CapacitorOcr', so
+     looking for 'Ocr' finds nothing and the Scan button silently never
+     appears — which looks identical to "not installed". The alternatives are
+     listed so swapping plugin later needs no change here. */
   function ocrPlugin() {
     var p = (window.Capacitor && window.Capacitor.Plugins) || {};
-    return p.Ocr || p.TextRecognition || null;
+    return p.CapacitorOcr || p.Ocr || p.TextRecognition || p.MlKitTextRecognition || null;
   }
 
   function cameraPlugin() {
     var p = (window.Capacitor && window.Capacitor.Plugins) || {};
     return p.Camera || null;
+  }
+
+  function filesystemPlugin() {
+    var p = (window.Capacitor && window.Capacitor.Plugins) || {};
+    return p.Filesystem || null;
   }
 
   $('btnImport').addEventListener('click', function () {
@@ -1415,9 +1425,7 @@
     Camera.getPhoto({ quality: 90, resultType: 'uri', source: 'CAMERA', correctOrientation: true })
       .then(function (photo) {
         UI.toast('Reading the page…');
-        var image = photo.path || photo.webPath || photo.dataUrl;
-        return Ocr.process ? Ocr.process({ image: image })
-                           : Ocr.detectText({ filename: image });
+        return recognise(Ocr, photo);
       })
       .then(function (res) {
         var text = ocrText(res);
@@ -1432,6 +1440,32 @@
         haptic(HAPTIC.warn);
         UI.toast("Couldn't read that photo — type the list instead");
       });
+  }
+
+  /* Hand the photo to whichever OCR plugin is installed.
+
+     Two calling conventions are covered because the plugins disagree:
+     detectText({filename}) for image-to-text, process({image}) for the
+     ML Kit wrappers. If the path cannot be read across the native bridge —
+     which depends on where the camera chose to write the file — the photo is
+     re-read as bytes and handed over that way instead. Slower and heavier,
+     but it is the difference between "scanning doesn't work on my phone" and
+     a two-second delay. */
+  function recognise(Ocr, photo) {
+    var path = photo.path || photo.webPath;
+
+    var first = Ocr.detectText ? Ocr.detectText({ filename: path })
+                               : Ocr.process({ image: path });
+
+    return first.catch(function () {
+      var FS = filesystemPlugin();
+      if (!FS || !photo.path) throw new Error('unreadable');
+      return FS.readFile({ path: photo.path }).then(function (file) {
+        var data = file.data;
+        if (Ocr.detectText) return Ocr.detectText({ base64: data });
+        return Ocr.process({ image: 'data:image/jpeg;base64,' + data });
+      });
+    });
   }
 
   /* Different OCR plugins hand back different shapes. Take whichever one this
