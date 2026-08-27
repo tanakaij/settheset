@@ -149,7 +149,7 @@
      would otherwise cost the user a second Back press that appeared to do
      nothing.
      ============================================================ */
-  var PARENT = { sets: null, songs: null, editor: 'sets', live: 'editor', sheet: 'editor', import: 'sets' };
+  var PARENT = { sets: null, songs: 'sets', editor: 'sets', live: 'editor', sheet: 'editor', import: 'sets' };
   var ignorePop = false;      // set when WE caused the popstate
   var modalPushed = false;    // an open sheet owns a history entry
 
@@ -208,7 +208,7 @@
   });
 
   /* ---------------- view switching ---------------- */
-  var DEPTH = { sets: 0, songs: 0, import: 1, editor: 1, sheet: 2, live: 2 };
+  var DEPTH = { sets: 0, songs: 1, import: 1, editor: 1, sheet: 2, live: 2 };
 
   function show(view) {
     var back = DEPTH[view] < DEPTH[state.view];
@@ -217,13 +217,13 @@
       $('view-' + v).classList.toggle('is-active', v === view);
     });
 
-    var deep = view === 'editor' || view === 'live' || view === 'sheet' || view === 'import';
+    var deep = view === 'songs' || view === 'editor' || view === 'live' || view === 'sheet' || view === 'import';
     $('btnBack').hidden = !deep;
     $('topNav').hidden = deep;
     $('topMark').hidden = deep;
     $('topbar').hidden = view === 'live';
-    $('navRail').hidden = view === 'live';
-    document.body.classList.toggle('rail-off', view === 'live');
+    $('navRail').hidden = view !== 'sets';
+    document.body.classList.toggle('rail-off', view !== 'sets');
 
     if (view === 'sets') $('topTitle').textContent = 'SetTheSet';
     if (view === 'songs') $('topTitle').textContent = 'Song library';
@@ -1798,14 +1798,14 @@
      ============================================================ */
   $('btnBackup').addEventListener('click', function () {
     Promise.all([DB.all('songs'), DB.all('setlists')]).then(function (r) {
-      var blob = new Blob([JSON.stringify({ songs: r[0], setlists: r[1], exportedAt: Date.now() }, null, 2)],
-                          { type: 'application/json' });
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement('a');
-      a.href = url;
-      a.download = 'settheset-backup-' + new Date().toISOString().slice(0, 10) + '.json';
-      a.click();
-      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      var json = JSON.stringify({ songs: r[0], setlists: r[1], exportedAt: Date.now() }, null, 2);
+      var bytes = new TextEncoder().encode(json);
+      var filename = 'settheset-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+      return Exporter.save(filename, bytes, 'application/json', { open: false });
+    }).then(function (res) {
+      UI.toast('Backed up to ' + ((res && res.where) || 'your downloads'));
+    }).catch(function () {
+      UI.toast("Backup couldn't be saved");
     });
   });
 

@@ -67,6 +67,13 @@
 
   --grad: linear-gradient(100deg, var(--violet) 0%, #3C8CF0 48%, var(--cyan) 100%);
 
+  /* Ambient glow pools used behind the whole app and the rail — same three
+     accent hues as --grad, just spread out and dimmed so they read as
+     atmosphere rather than as shapes. */
+  --glow-violet: rgba(107,79,232,0.30);
+  --glow-cyan:   rgba(39,234,252,0.16);
+  --glow-mint:   rgba(72,248,186,0.12);
+
   --font-display: 'Bricolage', ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-ui:      'Instrument', ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   --font-data:    'JetBrainsMono', ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
@@ -106,11 +113,15 @@ html {
 body {
   margin: 0;
   background: var(--bg);
-  /* Two very soft pools of colour, fixed so they don't scroll with content.
-     Costs nothing and stops a full screen of dark slate reading as flat. */
+  /* Ambient glow, not decoration you're meant to notice as shapes: four soft
+     pools in the app's own accent hues, fixed so they don't scroll with
+     content. A flat slate screen reads as unfinished; this is what makes it
+     read as a lit surface instead. */
   background-image:
-    radial-gradient(1100px 520px at 88% -8%, rgba(107,79,232,0.20), transparent 62%),
-    radial-gradient(820px 460px at -12% 4%, rgba(39,234,252,0.09), transparent 60%);
+    radial-gradient(900px 620px at 92% -10%, var(--glow-violet), transparent 60%),
+    radial-gradient(760px 520px at 6% 8%, var(--glow-cyan), transparent 58%),
+    radial-gradient(640px 520px at 78% 96%, var(--glow-mint), transparent 55%),
+    linear-gradient(180deg, #363C4C 0%, var(--bg) 40%, #262B37 100%);
   background-attachment: fixed;
   color: var(--text);
   font-family: var(--font-ui);
@@ -126,9 +137,10 @@ body {
   padding-left: calc(var(--rail-w) + env(safe-area-inset-left));
 }
 
-/* Live mode goes full-bleed: the rail hides (see js/app.js) and the gutter
-   it left behind has to close with it, or the performance view would run
-   off-centre with a dead strip of background down the left edge. */
+/* Every screen except the home screen (Sets) goes full-bleed: the rail
+   hides (see js/app.js) and the gutter it left behind has to close with
+   it, or those screens would run off-centre with a dead strip of
+   background down the left edge. */
 body.rail-off { padding-left: 0; }
 
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -145,7 +157,7 @@ body.rail-off { padding-left: 0; }
   padding-top: calc(10px + env(safe-area-inset-top));
   padding-left: calc(var(--pad) + env(safe-area-inset-left));
   padding-right: calc(var(--pad) + env(safe-area-inset-right));
-  background: var(--panel);
+  background: linear-gradient(180deg, #1E2027 0%, #17181D 100%);
   border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 
@@ -213,9 +225,12 @@ body.rail-off { padding-left: 0; }
 /* ---------------- navigation rail ----------------
    Fixed to the left edge, full height, above everything except the modal
    and toast. Carries the brand mark, the Sets/Songs destinations (moved
-   here from the old horizontal tab bar) and Help. Same [hidden]-vs-author-
-   display trap as .modal and .topbar__nav below: the rule at the very end
-   of this block is what actually lets js/app.js hide it for live mode. */
+   here from the old horizontal tab bar) and Help. Visible only on the home
+   screen (Sets) — every other view is reached and left via the on-screen
+   Back button, same as Editor always was, so the rail doesn't stick around
+   as a second, competing way to navigate. Same [hidden]-vs-author-display
+   trap as .modal and .topbar__nav below: the rule at the very end of this
+   block is what actually lets js/app.js hide it. */
 .rail {
   position: fixed;
   left: 0;
@@ -229,9 +244,29 @@ body.rail-off { padding-left: 0; }
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  background: linear-gradient(180deg, #24293480 0%, #1C202880 100%), var(--panel);
-  border-right: 1px solid rgba(255,255,255,0.07);
-  box-shadow: 6px 0 24px rgba(4,5,8,0.28);
+  /* A dedicated palette, not a dimmed copy of the page: a violet spotlight
+     bleeding down from the brand mark, a cooler cyan pool low in the frame,
+     over a darker base than --panel so the rail reads as its own plane
+     sitting in front of the app rather than a strip cut from the same
+     background. */
+  background:
+    radial-gradient(120px 160px at 50% 0%, rgba(107,79,232,0.45), transparent 70%),
+    radial-gradient(90px 140px at 50% 100%, rgba(39,234,252,0.22), transparent 75%),
+    linear-gradient(180deg, #1D2028 0%, #16171C 55%, #131317 100%);
+  box-shadow: 6px 0 28px rgba(4,5,8,0.34);
+}
+
+/* A thin gradient spine on the outer edge is the single strongest cue that
+   this column belongs to a different surface than the page beside it. */
+.rail::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(180deg, var(--violet) 0%, #3C8CF0 45%, var(--cyan) 100%);
+  opacity: 0.55;
 }
 
 .rail__brand {
