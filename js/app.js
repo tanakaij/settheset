@@ -65,6 +65,11 @@
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
 
+  function todayISO() {
+    var d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
   function mins(v) {
     var n = parseInt(v, 10);
     return isNaN(n) || n < 0 ? 0 : n;
@@ -217,6 +222,8 @@
     $('topNav').hidden = deep;
     $('topMark').hidden = deep;
     $('topbar').hidden = view === 'live';
+    $('navRail').hidden = view === 'live';
+    document.body.classList.toggle('rail-off', view === 'live');
 
     if (view === 'sets') $('topTitle').textContent = 'SetTheSet';
     if (view === 'songs') $('topTitle').textContent = 'Song library';
@@ -305,6 +312,17 @@
       host.appendChild(li);
     });
     $('setsEmpty').hidden = state.sets.length > 0;
+
+    var statCount = $('statSetsCount');
+    if (statCount) statCount.textContent = String(state.sets.length);
+    var statNext = $('statSetsNext');
+    if (statNext) {
+      var today = todayISO();
+      var upcoming = state.sets
+        .filter(function (s) { return s.date && s.date >= today; })
+        .sort(function (a, b) { return (a.date || '').localeCompare(b.date || ''); })[0];
+      statNext.textContent = upcoming ? fmtDate(upcoming.date) : '—';
+    }
   }
 
   $('setList').addEventListener('click', function (e) {
@@ -729,6 +747,15 @@
     });
 
     $('songsEmpty').hidden = state.songs.length > 0;
+
+    var statCount = $('statSongsCount');
+    if (statCount) statCount.textContent = String(state.songs.length);
+    var statKeys = $('statSongsKeys');
+    if (statKeys) {
+      var keys = {};
+      state.songs.forEach(function (s) { if (s.key) keys[s.key] = 1; });
+      statKeys.textContent = String(Object.keys(keys).length);
+    }
   }
 
   $('songSearch').addEventListener('input', function (e) {
