@@ -67,6 +67,14 @@
 
   --grad: linear-gradient(100deg, var(--violet) 0%, #3C8CF0 48%, var(--cyan) 100%);
 
+  /* Status hues. Warnings in this app are about a service overrunning or a
+     missing key — amber, not red. Red is reserved for destructive actions, so
+     it has to keep meaning "this deletes something". */
+  --warn:      #FFC24B;
+  --warn-dim:  rgba(255,194,75,0.14);
+  --ok-dim:    rgba(72,248,186,0.13);
+  --info-dim:  rgba(39,234,252,0.12);
+
   /* Ambient glow pools used behind the whole app and the rail — same three
      accent hues as --grad, just spread out and dimmed so they read as
      atmosphere rather than as shapes. */
@@ -1767,6 +1775,13 @@ select {
 
 @media (max-width: 360px) {
   :root { --pad: 12px; }
+  /* Three stats across a 320px screen minus the rail: the label is what
+     carries the meaning here, so the number gives up the size, not the label. */
+  .stat { padding: 11px 9px; }
+  .stat__num { font-size: 20px; }
+  .stat__num--sm { font-size: 13px; }
+  .quick__btn { min-height: 76px; padding: 11px; font-size: 13.5px; }
+  .hero__title { font-size: 24px; }
   .chart { margin-left: 0; }
   .item__data, .item__artist, .item__roles, .item__note { margin-left: 0; }
   .tab { padding: 0 12px; font-size: 14px; }
@@ -1788,4 +1803,634 @@ select {
   /* animation-fill-mode both would otherwise leave these invisible */
   .view, .items .item, .cards .card, .livelist .lcard,
   .modal__scrim, .toast { opacity: 1; transform: none; }
+}
+
+/* ============================================================
+   HERO — the next service
+   The home screen used to open on three stacked grey buttons and
+   a pair of counters, which told you the app worked but nothing
+   about your Sunday. This is the answer to the only question you
+   open the app to ask: what is next, and is it ready?
+   ============================================================ */
+.hero {
+  position: relative;
+  display: block;
+  width: 100%;
+  text-align: left;
+  color: #fff;
+  font: inherit;
+  border: 0;
+  border-radius: var(--r-l);
+  padding: 0;
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--grad);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.22) inset, 0 18px 44px rgba(40,80,190,0.30);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* A soft light source in the top-right corner, so the gradient reads as a lit
+   surface rather than a flat swatch. */
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(420px 220px at 88% -20%, rgba(255,255,255,0.34), transparent 62%),
+    radial-gradient(300px 260px at 8% 120%, rgba(4,10,30,0.30), transparent 68%);
+  pointer-events: none;
+}
+
+/* The whole card face is one button, so everything inside it has to be a
+   <span> — a <div> or <h2> nested in a button is invalid markup that some
+   engines silently reparent, which moves it out of the button entirely.
+   Spans are inline by default, so each of these needs its display restored
+   or the eyebrow, title, meta and key run all collapse onto one line. */
+.hero__inner {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 18px 18px 16px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.hero__top { display: flex; align-items: center; gap: 10px; }
+
+.hero__eyebrow {
+  font-family: var(--font-data);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.88);
+}
+
+/* The countdown is the part people actually scan for. */
+.hero__when {
+  margin-left: auto;
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #fff;
+  background: rgba(255,255,255,0.20);
+  border: 1px solid rgba(255,255,255,0.30);
+  border-radius: 999px;
+  padding: 4px 11px;
+  white-space: nowrap;
+}
+
+.hero__when--today { background: var(--mint); border-color: var(--mint); color: #06231A; }
+
+.hero__title {
+  display: block;
+  font-family: var(--font-display);
+  margin: 8px 0 0;
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.hero__meta {
+  display: block;
+  margin-top: 7px;
+  font-family: var(--font-data);
+  font-size: 12.5px;
+  color: rgba(255,255,255,0.86);
+}
+
+.hero__meta span + span::before { content: " · "; }
+
+/* The harmonic shape of the morning, in one line. Reading G → Ab → Bb tells a
+   musician more about the service than the song titles do. */
+.hero__keys { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 13px; }
+
+.hero__key {
+  font-family: var(--font-data);
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #fff;
+  background: rgba(8,14,36,0.30);
+  border: 1px solid rgba(255,255,255,0.22);
+  border-radius: 6px;
+  padding: 3px 9px;
+}
+
+.hero__arrow { color: rgba(255,255,255,0.55); font-size: 12px; align-self: center; }
+
+.hero__bar {
+  display: block;
+  height: 5px;
+  margin-top: 14px;
+  border-radius: 999px;
+  background: rgba(8,14,36,0.30);
+  overflow: hidden;
+}
+
+.hero__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--mint);
+  transition: width 420ms cubic-bezier(0.22, 0.8, 0.3, 1);
+}
+
+.hero__acts {
+  position: relative;
+  display: flex;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.hero__acts .btn {
+  flex: 1;
+  min-height: 46px;
+  font-size: 15px;
+  background: rgba(255,255,255,0.16);
+  border-color: rgba(255,255,255,0.24);
+  color: #fff;
+  box-shadow: none;
+}
+
+.hero__acts .btn--go { background: #fff; color: #14213B; border-color: #fff; font-weight: 800; }
+
+/* ============================================================
+   QUICK ACTIONS
+   Two full-width stacked buttons became a row of tiles: same two
+   destinations, a third of the vertical space, and the icon does
+   the explaining that a long label used to.
+   ============================================================ */
+.quick { display: flex; gap: 10px; margin: 14px 0 0; }
+
+.quick__btn {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 84px;
+  padding: 13px;
+  font: inherit;
+  font-weight: 700;
+  font-size: 14.5px;
+  text-align: left;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+.quick__ico {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--ok-dim);
+  color: var(--mint);
+}
+
+.quick__ico svg { display: block; }
+.quick__btn--alt .quick__ico { background: var(--info-dim); color: var(--cyan); }
+.quick__label { line-height: 1.25; }
+
+/* ============================================================
+   SECTION HEADERS
+   One flat list of services gave the same weight to next Sunday
+   and to a Sunday eighteen months ago. Splitting them costs one
+   line of chrome and makes the list scannable.
+   ============================================================ */
+.sechead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 26px 0 2px;
+  padding: 0 2px;
+}
+
+.sechead__title {
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sechead__count {
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  background: rgba(255,255,255,0.07);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.sechead__rule {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--line-firm), transparent);
+}
+
+/* ============================================================
+   CARD ENRICHMENT
+   ============================================================ */
+
+/* A left edge that carries state: mint when the service is done, gradient
+   when it is the next one up, nothing otherwise. One pixel of colour doing
+   the work a status label would have taken a whole line to say. */
+.card { position: relative; }
+
+.card--next::before,
+.card--done::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+}
+
+.card--next::before { background: var(--grad); }
+.card--done::before { background: var(--mint); opacity: 0.5; }
+.card--past .card__main { opacity: 0.72; }
+
+.card__row { display: flex; align-items: baseline; gap: 10px; }
+.card__row .card__date {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Inline key run on a service card — the same idea as the hero strip, smaller. */
+.card__keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 9px;
+}
+
+/* Base class, not scoped to .card__keys: the same chip is used for the keys a
+   song has been done in and for the key of the next item in live mode. */
+.kmini {
+  display: inline-block;
+  font-family: var(--font-data);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text);
+  background: rgba(255,255,255,0.07);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+
+.kmini--more { color: var(--muted); border-style: dashed; }
+
+/* Thin completion bar on a part-run service. */
+.card__prog {
+  height: 3px;
+  margin-top: 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+}
+
+.card__prog span { display: block; height: 100%; background: var(--mint); border-radius: 999px; }
+
+/* ============================================================
+   BADGES
+   ============================================================ */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: rgba(255,255,255,0.07);
+  color: var(--muted);
+}
+
+.badge--ok    { background: var(--ok-dim);   color: var(--mint); }
+.badge--warn  { background: var(--warn-dim); color: var(--warn); }
+.badge--info  { background: var(--info-dim); color: var(--cyan); }
+.badge--rest  { background: rgba(255,255,255,0.07); color: var(--muted); }
+
+/* ============================================================
+   SERVICE HEALTH
+   The running clock already knew the service would overrun. It
+   just never said so. This is that knowledge, stated.
+   ============================================================ */
+.health {
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  margin-top: 14px;
+  overflow: hidden;
+}
+
+.health__top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 13px 15px;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.health__dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--mint);
+}
+
+.health--warn .health__dot { background: var(--warn); }
+.health--note .health__dot { background: var(--cyan); }
+
+.health__label { flex: 1 1 auto; min-width: 0; font-size: 15px; font-weight: 700; }
+
+.health__sum {
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.health__chev { color: var(--muted); font-size: 13px; transition: transform 160ms ease; }
+.health.is-open .health__chev { transform: rotate(180deg); }
+
+.health__body { padding: 0 15px 13px; display: none; }
+.health.is-open .health__body { display: block; }
+
+.hitem {
+  display: flex;
+  gap: 10px;
+  padding: 11px 0;
+  border-top: 1px solid var(--line);
+}
+
+.hitem__mark {
+  flex: 0 0 auto;
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.5;
+  color: var(--warn);
+}
+
+.hitem--note .hitem__mark { color: var(--cyan); }
+.hitem__title { font-size: 15px; font-weight: 700; margin: 0; }
+.hitem__detail { margin: 3px 0 0; font-size: 13.5px; color: var(--muted); line-height: 1.45; }
+
+/* The whole service in one line of keys, under the health strip. */
+.journey {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding: 11px 15px;
+  border-top: 1px solid var(--line);
+}
+
+.journey__label {
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-right: 4px;
+}
+
+.journey__key {
+  font-family: var(--font-data);
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--mint);
+  background: var(--ok-dim);
+  border-radius: 5px;
+  padding: 2px 8px;
+}
+
+.journey__sep { color: var(--muted); font-size: 11px; }
+
+/* ============================================================
+   FILTER BAR — song library
+   A search box alone is only useful when you already know what
+   you are looking for. These answer the question you actually
+   have: what have we not sung in a while?
+   ============================================================ */
+.filters {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  margin: 12px 0 0;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.filters::-webkit-scrollbar { display: none; }
+
+.chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chip__n {
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+  background: rgba(255,255,255,0.08);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+
+.chip.is-active { background: var(--mint); color: #10231C; border-color: var(--mint); }
+.chip.is-active .chip__n { background: rgba(16,35,28,0.18); color: #10231C; }
+
+/* ============================================================
+   LIVE — the running clock
+   The one number a musical director carries in their head all
+   morning, and the one thing a paper running order can never
+   tell you: are we late, and by how much.
+   ============================================================ */
+.live__clocks { display: flex; align-items: center; gap: 8px; }
+
+.live__now {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+
+.drift {
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: var(--ok-dim);
+  color: var(--mint);
+}
+
+.drift--late   { background: var(--warn-dim); color: var(--warn); }
+.drift--early  { background: var(--info-dim); color: var(--cyan); }
+.drift--before { background: rgba(255,255,255,0.08); color: var(--muted); }
+
+/* How long the current item has actually been running, next to how long it
+   was supposed to take. */
+.lcard__elapsed {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 10px;
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+  background: rgba(255,255,255,0.06);
+  border-radius: 8px;
+  padding: 5px 10px;
+}
+
+.lcard__elapsed b { color: var(--mint); font-weight: 800; }
+.lcard__elapsed.is-over b { color: var(--warn); }
+
+/* What is coming, so you can set up for it without scrolling away from
+   what you are playing. */
+.lcard__next {
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid var(--line);
+  font-family: var(--font-data);
+  font-size: 12.5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.lcard__next b { color: var(--text); font-weight: 700; }
+.lcard__next .kmini {
+  font-weight: 800;
+  color: var(--mint);
+  background: var(--ok-dim);
+  border-color: transparent;
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-left: 4px;
+}
+
+/* ============================================================
+   SONG CARD — usage
+   ============================================================ */
+.card__usage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+  flex-wrap: wrap;
+}
+
+.card__usebar {
+  flex: 1 1 60px;
+  min-width: 40px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+}
+
+.card__usebar span { display: block; height: 100%; background: var(--cyan); opacity: 0.8; border-radius: 999px; }
+
+/* ============================================================
+   TOAST VARIANTS
+   A single mint pill for "Deleted", "Saved" and "Nothing to
+   share" flattens three different outcomes into one.
+   ============================================================ */
+.toast--warn { background: var(--warn); color: #2A1D00; }
+.toast--info { background: var(--cyan); color: #04252A; }
+
+/* ============================================================
+   SKELETONS
+   IndexedDB opens fast but not instantly, and on a cold start the
+   list area was blank long enough to read as empty. A shape in
+   the right place says "loading" without a spinner.
+   ============================================================ */
+.skel { list-style: none; margin: 14px 0 0; padding: 0; }
+
+.skel__row {
+  height: 92px;
+  margin-bottom: 12px;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(90deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 100%)
+    var(--card);
+  background-size: 220% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  from { background-position: 120% 0; }
+  to   { background-position: -120% 0; }
+}
+
+/* ============================================================
+   SHARE ROW
+   ============================================================ */
+.row--three > * { flex: 1 1 0; min-width: 0; }
+.row--three .btn { padding: 0 10px; font-size: 14.5px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .skel__row { animation: none !important; }
+  .hero__fill { transition: none !important; }
 }

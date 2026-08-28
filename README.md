@@ -48,6 +48,40 @@ the media desk gets first lines and timings and no chord charts. *Save as PDF*
 in the print dialog gives a real PDF with selectable text, no PDF library
 bundled. Print each view separately.
 
+**The home screen leads with next Sunday.** A hero card carries the countdown
+("in 3 days"), the song and element counts, the running time and finish, the
+run of keys the service travels through, and how far through it you got if you
+have started. Open and Run service sit on it. Below, services are split into
+**Coming up** and **Done** rather than one flat list where next Sunday and a
+Sunday eighteen months ago carried identical weight.
+
+**Song rotation.** Every song in the library shows how many times it has been
+played and when it last was — derived from the services already on the device,
+so there is nothing new to store or keep in step. Four filters answer the
+question you actually arrive with: *All*, *Recent* (inside a month), *Resting*
+(a quarter without it) and *Never played*. Future services do not count as
+plays.
+
+**Service health.** Give the service a target length and the editor says
+*"Over the slot by 15 min"* while there is still time to do something about it.
+It also flags songs with no key, items with no length, three consecutive songs
+in the same key, and a running order with no elements in it. Every warning
+carries the arithmetic behind it — "75 min of material against a 60 min
+service" is actionable in a way that "this looks long" is not. Collapsed to one
+line when there is nothing wrong.
+
+**The running clock, live.** During the service the bar carries the wall clock
+and a drift chip: *On time*, *4 min behind*, *6 min ahead*. The current song
+shows how long it has actually been running against how long it was given, and
+the card previews what is coming so you can set up for it without scrolling
+away from what you are playing. This is the number an MD carries in their head
+all morning and the one thing a paper running order can never tell you.
+
+**Share list** — the running order as plain text, straight to the group chat.
+A PDF is the right artefact for a music stand and the wrong one for WhatsApp
+the night before, where half the team will open it on a phone with no storage
+left. Native share sheet where there is one, clipboard everywhere else.
+
 **Back up / Restore** — writes a JSON file of everything. Do it occasionally.
 
 ## Usability choices
@@ -74,12 +108,32 @@ settheset.manifest.json        PWA manifest
 resources/                     icons (from mark.svg) + three subset woff2 faces
 tools/make_icons.py            regenerates them
 tools/make_android_assets.py   renders the APK launcher icons (run locally)
-tests/                         npm test — 332 assertions, gates the APK build
+tests/                         npm test — 603 assertions, gates the APK build
 scripts/                       Capacitor signing, theme and launcher-icon patches
 signing/                       the stable release keystore — DO NOT DELETE
 .github/workflows/build-apk.yml
 .nojekyll                      tells Pages to serve files as-is
 ```
+
+## Design notes
+
+**The hero.** The home screen opened on three stacked grey buttons and a pair
+of counters: it told you the app worked, not what your Sunday looked like. The
+gradient was already reserved for "the thing that is live right now" — the next
+service is the home-screen equivalent of that, so it gets the same treatment.
+
+**Everything derived, nothing stored.** Usage counts, rotation status, health
+warnings and drift are all computed from setlists that were already on the
+device. No new store, no migration, no second source of truth to fall out of
+step. The usage index is invalidated whenever services reload.
+
+**Warnings are amber, not red.** Red stays reserved for destructive actions in
+this app, so it has to keep meaning "this deletes something". A service running
+long is amber; a missing key is amber; Delete is red.
+
+**Evidence, not vibes.** Every warning names the songs and the numbers that
+produced it. A confident-sounding claim with nothing visible behind it is worse
+than silence, particularly on a screen someone checks at 8am on a Sunday.
 
 ## Theme
 

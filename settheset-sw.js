@@ -9,7 +9,7 @@
  * always re-fetches this file rather than serving it from the HTTP cache,
  * which is what makes the bump take effect on the next load.
  */
-var CACHE_VERSION = 'v12';
+var CACHE_VERSION = 'v13';
 var SHELL_CACHE = 'settheset-shell-' + CACHE_VERSION;
 
 /* Note: './' is deliberately absent. cache.addAll() rejects wholesale if any
@@ -23,6 +23,7 @@ var SHELL = [
   'js/chords.js',
   'js/sample.js',
   'js/metronome.js',
+  'js/insights.js',
   'js/ui.js',
   'js/export.js',
   'js/import.js',

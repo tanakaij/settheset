@@ -48,6 +48,8 @@
   var state = {
     view: 'sets', setId: null, set: null,
     songs: [], sets: [], wakeLock: null, query: '', sheetView: 'full',
+    songFilter: 'all', usage: null, healthOpen: false, emptyHTML: null,
+    liveTimer: null, liveIdx: -1, liveStartedAt: 0,
     clickIdx: -1        // which song the metronome is running for, if any
   };
 
@@ -250,10 +252,15 @@
 
     if (view === 'live') {
       lockScreen();
+      startClock();
     } else {
       releaseScreen();
       // leaving live must silence the click, however you left
       if (Metronome.isRunning()) { Metronome.stop(); state.clickIdx = -1; }
+      // ...and stop the clock, so a background tab isn't left ticking a timer
+      // it has nothing to display.
+      stopClock();
+      state.liveIdx = -1;
     }
   }
 
@@ -271,7 +278,13 @@
   document.querySelectorAll('.tab[data-view]').forEach(function (t) {
     t.addEventListener('click', function () {
       var v = t.getAttribute('data-view');
-      (v === 'songs' ? loadSongs().then(renderSongs) : loadSets().then(renderSets)).then(function () { navTo(v); });
+      // Songs needs the services too: usage ("12× · 3 weeks ago") is derived
+      // from them, so arriving here with a stale set list would report last
+      // week's picture.
+      (v === 'songs'
+        ? Promise.all([loadSongs(), loadSets()]).then(renderSongs)
+        : loadSets().then(renderSets)
+      ).then(function () { navTo(v); });
     });
   });
 
@@ -282,48 +295,214 @@
     return DB.all('setlists').then(function (rows) {
       rows.sort(function (a, b) { return (b.date || '').localeCompare(a.date || ''); });
       state.sets = rows;
+      // Usage is derived from these rows, so it has to be recomputed whenever
+      // they change — a stale index would quietly report last week's picture.
+      state.usage = null;
       return rows;
     });
   }
 
+  /* How far away a service is, in the words you would actually use.
+     "In 3 days" is what you want to know; "2026-08-31" is what you already
+     knew from the date underneath it. */
+  function countdown(iso, today) {
+    var d = Insights.daysBetween(today, iso);
+    if (d == null) return '';
+    if (d === 0) return 'Today';
+    if (d === 1) return 'Tomorrow';
+    if (d > 1 && d < 7) return 'In ' + d + ' days';
+    if (d === 7) return 'Next week';
+    if (d > 7) return 'In ' + Math.round(d / 7) + ' weeks';
+    if (d === -1) return 'Yesterday';
+    if (d > -7) return Math.abs(d) + ' days ago';
+    return Math.round(Math.abs(d) / 7) + ' weeks ago';
+  }
+
+  /* The run of keys a service travels through. Reading G → Ab → Bb tells a
+     musician more about the morning than the song titles do. */
+  function keyRun(items, limit) {
+    var keys = (items || []).filter(isSong)
+      .map(function (i) { return i.key; })
+      .filter(Boolean);
+    var out = [];
+    keys.forEach(function (k) { if (out[out.length - 1] !== k) out.push(k); });
+    if (limit && out.length > limit) return { keys: out.slice(0, limit), more: out.length - limit };
+    return { keys: out, more: 0 };
+  }
+
+  /* ---------------- the hero ----------------
+     The home screen used to open on stacked grey buttons and a pair of
+     counters: it told you the app worked, not what your Sunday looked like.
+     This card answers the only question anyone opens this app to ask. */
+  function renderHero() {
+    var host = $('heroHost');
+    if (!host) return;
+    var today = todayISO();
+
+    // The next service that hasn't happened, or failing that the most recent
+    // one — after a Sunday you usually still want the morning's list.
+    var upcoming = state.sets
+      .filter(function (s) { return s.date && s.date >= today; })
+      .sort(function (a, b) { return (a.date || '').localeCompare(b.date || ''); });
+    var target = upcoming[0] ||
+      state.sets.filter(function (s) { return s.date; })
+        .sort(function (a, b) { return (b.date || '').localeCompare(a.date || ''); })[0];
+
+    if (!target) { host.innerHTML = ''; return; }
+
+    var items = target.items || [];
+    var songs = items.filter(isSong).length;
+    var done = items.filter(function (i) { return i.performed; }).length;
+    var total = totalMinutes(items);
+    var ends = items.length ? clockFor(items, items.length, target.startTime) : null;
+    var when = countdown(target.date, today);
+    var isToday = target.date === today;
+    var run = keyRun(items, 6);
+
+    var meta = [];
+    meta.push('<span>' + songs + (songs === 1 ? ' song' : ' songs') + '</span>');
+    if (items.length - songs) meta.push('<span>' + (items.length - songs) + ' elements</span>');
+    if (total) meta.push('<span>' + fmtDuration(total) + '</span>');
+    if (ends && ends.isClock) meta.push('<span>ends ' + esc(ends.label) + '</span>');
+
+    host.innerHTML =
+      '<div class="hero">' +
+        '<button class="hero__inner" type="button" data-hero-open="' + esc(target.id) + '">' +
+          '<span class="hero__top">' +
+            '<span class="hero__eyebrow">' + esc(fmtDate(target.date)) +
+              (target.startTime ? ' · ' + esc(target.startTime) : '') + '</span>' +
+            '<span class="hero__when' + (isToday ? ' hero__when--today' : '') + '">' + esc(when) + '</span>' +
+          '</span>' +
+          '<span class="hero__title">' + esc(target.service || 'Sunday service') + '</span>' +
+          '<span class="hero__meta">' + meta.join('') + '</span>' +
+          (run.keys.length
+            ? '<span class="hero__keys">' +
+                run.keys.map(function (k, i) {
+                  return (i ? '<span class="hero__arrow">→</span>' : '') +
+                         '<span class="hero__key">' + esc(k) + '</span>';
+                }).join('') +
+                (run.more ? '<span class="hero__key">+' + run.more + '</span>' : '') +
+              '</span>'
+            : '') +
+          (done
+            ? '<span class="hero__bar"><span class="hero__fill" style="width:' +
+                Math.round((done / Math.max(items.length, 1)) * 100) + '%"></span></span>'
+            : '') +
+        '</button>' +
+        '<div class="hero__acts">' +
+          '<button class="btn" type="button" data-hero-open="' + esc(target.id) + '">Open</button>' +
+          '<button class="btn btn--go" type="button" data-hero-live="' + esc(target.id) + '">Run service</button>' +
+        '</div>' +
+      '</div>';
+  }
+
   function renderSets() {
     var host = $('setList');
+    var today = todayISO();
     host.innerHTML = '';
-    state.sets.forEach(function (s) {
+
+    var skel = $('setsSkeleton');
+    if (skel) skel.hidden = true;
+
+    renderHero();
+
+    // Next Sunday and a Sunday eighteen months ago were given identical weight
+    // in one flat list. Splitting them costs a line of chrome and makes the
+    // list scannable.
+    var upcoming = state.sets.filter(function (s) { return s.date && s.date >= today; })
+      .sort(function (a, b) { return (a.date || '').localeCompare(b.date || ''); });
+    var past = state.sets.filter(function (s) { return !s.date || s.date < today; });
+    var nextId = upcoming.length ? upcoming[0].id : null;
+
+    function section(label, rows) {
+      if (!rows.length) return;
+      var head = document.createElement('li');
+      head.className = 'sechead';
+      head.setAttribute('role', 'presentation');
+      head.innerHTML =
+        '<span class="sechead__title">' + esc(label) + '</span>' +
+        '<span class="sechead__count">' + rows.length + '</span>' +
+        '<span class="sechead__rule"></span>';
+      host.appendChild(head);
+      rows.forEach(addCard);
+    }
+
+    function addCard(s) {
       var items = s.items || [];
       var songs = items.filter(isSong).length;
       var done = items.filter(function (i) { return i.performed; }).length;
       var total = totalMinutes(items);
+      var run = keyRun(items, 5);
+      var isPast = !s.date || s.date < today;
+      var allDone = items.length > 0 && done === items.length;
+
+      var sub = [songs + ' songs', items.length + ' items'];
+      if (total) sub.push(fmtDuration(total));
 
       var li = document.createElement('li');
-      li.className = 'card';
+      li.className = 'card' +
+        (s.id === nextId ? ' card--next' : '') +
+        (allDone ? ' card--done' : '') +
+        (isPast ? ' card--past' : '');
+
       li.innerHTML =
         '<button class="card__main" type="button" data-open="' + esc(s.id) + '">' +
-          '<span class="card__date">' + esc(fmtDate(s.date)) + '</span>' +
+          '<span class="card__row">' +
+            '<span class="card__date">' + esc(fmtDate(s.date)) + '</span>' +
+            (s.id === nextId ? '<span class="badge badge--info">Next</span>' :
+             allDone ? '<span class="badge badge--ok">Run</span>' : '') +
+          '</span>' +
           '<div class="card__title">' + esc(s.service || 'Sunday service') + '</div>' +
-          '<div class="card__sub">' + songs + ' songs · ' + items.length + ' items' +
-            (total ? ' · ' + fmtDuration(total) : '') +
-            (done ? ' · ' + done + ' done' : '') + '</div>' +
+          '<div class="card__sub">' + sub.join(' · ') + '</div>' +
+          (run.keys.length
+            ? '<div class="card__keys">' +
+                run.keys.map(function (k) { return '<span class="kmini">' + esc(k) + '</span>'; }).join('') +
+                (run.more ? '<span class="kmini kmini--more">+' + run.more + '</span>' : '') +
+              '</div>'
+            : '') +
+          (done && !allDone
+            ? '<div class="card__prog"><span style="width:' +
+                Math.round((done / Math.max(items.length, 1)) * 100) + '%"></span></div>'
+            : '') +
         '</button>' +
         '<div class="card__acts">' +
           '<button class="btn btn--ghost" type="button" data-dup="' + esc(s.id) + '">Duplicate</button>' +
           '<button class="btn btn--danger" type="button" data-delset="' + esc(s.id) + '">Delete</button>' +
         '</div>';
       host.appendChild(li);
-    });
+    }
+
+    section('Coming up', upcoming);
+    section('Done', past);
+
     $('setsEmpty').hidden = state.sets.length > 0;
 
     var statCount = $('statSetsCount');
     if (statCount) statCount.textContent = String(state.sets.length);
-    var statNext = $('statSetsNext');
-    if (statNext) {
-      var today = todayISO();
-      var upcoming = state.sets
-        .filter(function (s) { return s.date && s.date >= today; })
-        .sort(function (a, b) { return (a.date || '').localeCompare(b.date || ''); })[0];
-      statNext.textContent = upcoming ? fmtDate(upcoming.date) : '—';
+
+    var statSongs = $('statSetsSongs');
+    if (statSongs) {
+      statSongs.textContent = String(state.sets.reduce(function (n, s) {
+        return n + (s.items || []).filter(isSong).length;
+      }, 0));
     }
+
+    var statNext = $('statSetsNext');
+    if (statNext) statNext.textContent = upcoming[0] ? countdown(upcoming[0].date, today) : '—';
   }
+
+  /* The hero's own buttons. Kept off the #setList delegate because the hero
+     lives outside that list. */
+  $('heroHost').addEventListener('click', function (e) {
+    var open = e.target.closest('[data-hero-open]');
+    var live = e.target.closest('[data-hero-live]');
+    if (live) {
+      return openSet(live.getAttribute('data-hero-live')).then(function () {
+        $('btnLive').click();
+      });
+    }
+    if (open) return openSet(open.getAttribute('data-hero-open'));
+  });
 
   $('setList').addEventListener('click', function (e) {
     var openId = e.target.closest('[data-open]');
@@ -389,6 +568,11 @@
           { name: 'startTime', label: 'Starts', type: 'time', value: set.startTime || '10:00' }
         ] },
         { name: 'service', label: 'Service', type: 'text', value: set.service, placeholder: 'Sunday morning' },
+        /* Without a target there is nothing for the running clock to be over.
+           With one, the editor can say "over the slot by 8 min" while there is
+           still time to do something about it. */
+        { name: 'targetMinutes', label: 'How long the service should run (minutes)', type: 'number',
+          value: set.targetMinutes, inputmode: 'numeric', placeholder: '90' },
         { name: 'notes', label: 'Notes for the team', type: 'textarea', rows: 3, value: set.notes,
           placeholder: 'Theme, guest minister, rehearsal time…' }
       ],
@@ -398,6 +582,7 @@
         rec.date = v.date;
         rec.startTime = v.startTime;
         rec.service = v.service;
+        rec.targetMinutes = v.targetMinutes;
         rec.notes = v.notes;
         return DB.put('setlists', rec).then(function () {
           if (isNew) return loadSets().then(function () { openSet(rec.id); });
@@ -419,6 +604,7 @@
     var items = s.items || [];
     var total = totalMinutes(items);
     var ends = items.length ? clockFor(items, items.length, s.startTime) : null;
+    var target = parseInt(s.targetMinutes, 10) || 0;
 
     $('setMeta').innerHTML =
       '<div class="setmeta__date">' + esc(fmtDate(s.date)) +
@@ -426,7 +612,10 @@
       '<h2 class="setmeta__title">' + esc(s.service || 'Sunday service') + '</h2>' +
       (total
         ? '<div class="setmeta__run">' + fmtDuration(total) + ' total' +
-          (ends && ends.isClock ? ' · ends ' + esc(ends.label) : '') + '</div>'
+          (ends && ends.isClock ? ' · ends ' + esc(ends.label) : '') +
+          (target && total > target ? ' · ' + (total - target) + ' min over' : '') +
+          (target && total <= target ? ' · ' + (target - total) + ' min spare' : '') +
+          '</div>'
         : '') +
       (s.notes ? '<p class="setmeta__note">' + esc(s.notes) + '</p>' : '');
 
@@ -484,6 +673,71 @@
     });
 
     $('itemsEmpty').hidden = items.length > 0;
+    renderHealth();
+  }
+
+  /* ---------------- service health ----------------
+     The running clock already knew this service would overrun; it just never
+     said so. Everything here is stated with the evidence behind it — "68 min
+     against a 60 min slot" is actionable in a way that "this looks long" is
+     not. Collapsed by default: on a service with nothing wrong it is one
+     green line, and it never pushes the running order down the screen. */
+  function renderHealth() {
+    var host = $('healthHost');
+    if (!host) return;
+    var s = state.set;
+    if (!s) { host.innerHTML = ''; return; }
+
+    var h = Insights.serviceHealth(s);
+    if (!h.items) { host.innerHTML = ''; return; }
+
+    var label, cls;
+    if (h.worst === 'warn') { cls = 'health--warn'; label = h.warnings.filter(function (w) { return w.level === 'warn'; }).length + ' to look at'; }
+    else if (h.worst === 'note') { cls = 'health--note'; label = h.warnings.length + (h.warnings.length === 1 ? ' note' : ' notes'); }
+    else { cls = ''; label = 'Running order looks sound'; }
+
+    var run = keyRun(s.items, 8);
+    var open = state.healthOpen ? ' is-open' : '';
+
+    host.innerHTML =
+      '<div class="health ' + cls + open + '" id="healthCard">' +
+        '<button class="health__top" type="button" id="healthToggle" ' +
+          'aria-expanded="' + (state.healthOpen ? 'true' : 'false') + '">' +
+          '<span class="health__dot"></span>' +
+          '<span class="health__label">' + esc(label) + '</span>' +
+          '<span class="health__sum">' + h.songs + ' songs · ' + fmtDuration(h.total) + '</span>' +
+          (h.warnings.length ? '<span class="health__chev" aria-hidden="true">▾</span>' : '') +
+        '</button>' +
+        (h.warnings.length
+          ? '<div class="health__body">' +
+              h.warnings.map(function (w) {
+                return '<div class="hitem hitem--' + w.level + '">' +
+                  '<span class="hitem__mark">' + (w.level === 'warn' ? '!' : 'i') + '</span>' +
+                  '<div><p class="hitem__title">' + esc(w.title) + '</p>' +
+                  '<p class="hitem__detail">' + esc(w.detail) + '</p></div>' +
+                '</div>';
+              }).join('') +
+            '</div>'
+          : '') +
+        (run.keys.length > 1
+          ? '<div class="journey">' +
+              '<span class="journey__label">Journey</span>' +
+              run.keys.map(function (k, i) {
+                return (i ? '<span class="journey__sep">→</span>' : '') +
+                  '<span class="journey__key">' + esc(k) + '</span>';
+              }).join('') +
+              (run.more ? '<span class="journey__sep">+' + run.more + '</span>' : '') +
+            '</div>'
+          : '') +
+      '</div>';
+
+    var toggle = $('healthToggle');
+    if (toggle && h.warnings.length) {
+      toggle.addEventListener('click', function () {
+        state.healthOpen = !state.healthOpen;
+        renderHealth();
+      });
+    }
   }
 
   /* The chart, shown as numbers and letters together. The numbers are what you
@@ -718,27 +972,93 @@
     });
   }
 
+  /* A library of two hundred songs with nothing but a search box only helps
+     when you already know what you are looking for. The question people
+     actually arrive with is the opposite one: what have we not sung in a
+     while? Usage is derived from the services already on the device — no new
+     storage, nothing to keep in step. */
+  function songUsage() {
+    if (!state.usage) state.usage = Insights.usageIndex(state.sets);
+    return state.usage;
+  }
+
+  function usageBadge(u) {
+    if (!u.count) return '<span class="badge badge--info">New</span>';
+    if (u.status === 'recent') return '<span class="badge badge--ok">In rotation</span>';
+    if (u.status === 'resting') return '<span class="badge badge--warn">Resting</span>';
+    return '';
+  }
+
   function renderSongs() {
     var q = state.query.toLowerCase();
-    var rows = state.songs.filter(function (s) {
-      return !q || (s.title + ' ' + (s.artist || '')).toLowerCase().indexOf(q) > -1;
+    var index = songUsage();
+    var filter = state.songFilter || 'all';
+
+    var decorated = state.songs.map(function (s) {
+      return { song: s, use: Insights.usageFor(s, index) };
     });
+
+    var counts = { all: decorated.length, recent: 0, resting: 0, 'new': 0 };
+    decorated.forEach(function (d) {
+      if (!d.use.count) counts['new']++;
+      else if (d.use.status === 'recent') counts.recent++;
+      else if (d.use.status === 'resting') counts.resting++;
+    });
+
+    var rows = decorated.filter(function (d) {
+      var s = d.song;
+      if (q && (s.title + ' ' + (s.artist || '')).toLowerCase().indexOf(q) === -1) return false;
+      if (filter === 'recent') return d.use.status === 'recent';
+      if (filter === 'resting') return d.use.status === 'resting';
+      if (filter === 'new') return !d.use.count;
+      return true;
+    });
+
+    // Inside a filter, the most useful order is by how long it has been —
+    // a "Resting" list is only actionable sorted by who has rested longest.
+    if (filter === 'resting' || filter === 'recent') {
+      rows.sort(function (a, b) { return (b.use.daysSince || 0) - (a.use.daysSince || 0); });
+    }
+
+    var busiest = decorated.reduce(function (best, d) {
+      return d.use.count > (best ? best.use.count : 0) ? d : best;
+    }, null);
 
     var host = $('songList');
     host.innerHTML = '';
-    rows.forEach(function (s) {
+
+    rows.forEach(function (d) {
+      var s = d.song;
+      var u = d.use;
       var sub = [];
       if (s.artist) sub.push(esc(s.artist));
       if (s.meter) sub.push(esc(s.meter));
       if (s.bpm) sub.push(esc(s.bpm) + ' bpm');
       if (s.minutes) sub.push(esc(s.minutes) + ' min');
 
+      // Bar length is relative to the most-played song, so it reads as
+      // "compared with the rest of the library" rather than an absolute.
+      var peak = busiest && busiest.use.count ? busiest.use.count : 1;
+      var pct = Math.round((u.count / peak) * 100);
+
       var li = document.createElement('li');
       li.className = 'card';
       li.innerHTML =
         '<button class="card__main" type="button" data-song="' + esc(s.id) + '">' +
+          '<span class="card__row">' +
+            '<span class="card__date">' + esc(Insights.usageLabel(u)) + '</span>' +
+            usageBadge(u) +
+          '</span>' +
           '<div class="card__title">' + esc(s.title) + ' ' + keyChip(s.key) + '</div>' +
           (sub.length ? '<div class="card__sub">' + sub.join(' · ') + '</div>' : '') +
+          (u.count
+            ? '<div class="card__usage">' +
+                (u.keys.length > 1
+                  ? '<span class="kmini">' + esc(u.keys.slice(0, 3).join(' / ')) + '</span>'
+                  : '') +
+                '<span class="card__usebar"><span style="width:' + pct + '%"></span></span>' +
+              '</div>'
+            : '') +
         '</button>' +
         '<div class="card__acts">' +
           '<button class="btn btn--danger" type="button" data-delsong="' + esc(s.id) + '">Delete</button>' +
@@ -746,7 +1066,32 @@
       host.appendChild(li);
     });
 
-    $('songsEmpty').hidden = state.songs.length > 0;
+    // An empty result from a filter is not an empty library, and saying so
+    // stops it reading as data loss. The first-run copy is stashed before it
+    // is overwritten, so emptying the library later still shows the right
+    // message rather than whatever the last filter left behind.
+    var emptyEl = $('songsEmpty');
+    if (emptyEl) {
+      if (state.emptyHTML == null) state.emptyHTML = emptyEl.innerHTML;
+      if (!state.songs.length) {
+        emptyEl.innerHTML = state.emptyHTML;
+        emptyEl.hidden = false;
+      } else if (!rows.length) {
+        emptyEl.innerHTML =
+          '<h2>Nothing in this filter</h2>' +
+          '<p>' + (q ? 'No song matches \u201c' + esc(state.query) + '\u201d. ' : '') +
+          'Your library still has ' + state.songs.length +
+          (state.songs.length === 1 ? ' song' : ' songs') + ' \u2014 tap <strong>All</strong>.</p>';
+        emptyEl.hidden = false;
+      } else {
+        emptyEl.hidden = true;
+      }
+    }
+
+    ['all', 'recent', 'resting', 'new'].forEach(function (k) {
+      var n = $('fn' + k.charAt(0).toUpperCase() + k.slice(1));
+      if (n) n.textContent = String(counts[k]);
+    });
 
     var statCount = $('statSongsCount');
     if (statCount) statCount.textContent = String(state.songs.length);
@@ -756,7 +1101,24 @@
       state.songs.forEach(function (s) { if (s.key) keys[s.key] = 1; });
       statKeys.textContent = String(Object.keys(keys).length);
     }
+    var statTop = $('statSongsTop');
+    if (statTop) {
+      statTop.textContent = busiest && busiest.use.count
+        ? busiest.song.title
+        : '—';
+    }
   }
+
+  $('songFilters').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-filter]');
+    if (!btn) return;
+    state.songFilter = btn.getAttribute('data-filter');
+    Array.prototype.forEach.call($('songFilters').querySelectorAll('.chip'), function (c) {
+      c.classList.toggle('is-active', c === btn);
+    });
+    haptic(HAPTIC.tap);
+    renderSongs();
+  });
 
   $('songSearch').addEventListener('input', function (e) {
     state.query = e.target.value;
@@ -832,6 +1194,54 @@
     });
   });
 
+  /* ---------------- the running clock ----------------
+     How far off the plan the service is, right now. This is the number a
+     musical director carries in their head all morning and the one thing a
+     paper running order can never tell you. It updates on its own timer,
+     independently of any render, because the service drifts whether or not
+     anyone touches the screen.
+
+     Needs a start time: with only cumulative offsets there is no wall clock
+     to be late against, so the chip stays hidden. */
+  function tickClock() {
+    var clock = $('liveClock');
+    var chip = $('liveDrift');
+    if (!clock || !chip) return;
+
+    var now = new Date();
+    clock.textContent = String(now.getHours()).padStart(2, '0') + ':' +
+                        String(now.getMinutes()).padStart(2, '0');
+
+    var d = state.set ? Insights.drift(state.set, state.set.items || [], now) : null;
+    if (!d) { chip.hidden = true; return; }
+
+    chip.hidden = false;
+    chip.textContent = d.label;
+    chip.className = 'drift' +
+      (d.state === 'late' ? ' drift--late'
+        : d.state === 'early' ? ' drift--early'
+        : d.state === 'before' ? ' drift--before' : '');
+
+    // The current item's own elapsed time, against what it was given.
+    var el = document.querySelector('.lcard--now .lcard__elapsed');
+    if (el && state.liveStartedAt) {
+      var mins = Math.floor((Date.now() - state.liveStartedAt) / 60000);
+      var planned = parseInt(el.getAttribute('data-planned'), 10) || 0;
+      el.innerHTML = '<b>' + mins + ' min</b> on this' + (planned ? ' · ' + planned + ' planned' : '');
+      el.classList.toggle('is-over', planned > 0 && mins > planned);
+    }
+  }
+
+  function startClock() {
+    stopClock();
+    tickClock();
+    state.liveTimer = setInterval(tickClock, 15000);
+  }
+
+  function stopClock() {
+    if (state.liveTimer) { clearInterval(state.liveTimer); state.liveTimer = null; }
+  }
+
   function renderLive() {
     var items = state.set.items || [];
     var nowIdx = items.findIndex(function (i) { return !i.performed; });
@@ -886,7 +1296,26 @@
       var running = state.clickIdx === idx;
       var canClick = isSong(it) && it.bpm;
 
-      li.innerHTML = head + body +
+      // Only the live card carries these: a timer on every row would be noise,
+      // and "up next" only means anything from the one you are on.
+      var isNow = idx === nowIdx;
+      var next = isNow ? items[idx + 1] : null;
+
+      var extras = isNow
+        ? '<span class="lcard__elapsed" data-planned="' + (parseInt(it.minutes, 10) || 0) + '">' +
+            '<b>0 min</b> on this' +
+            (it.minutes ? ' · ' + esc(it.minutes) + ' planned' : '') +
+          '</span>'
+        : '';
+
+      if (next) {
+        extras += '<div class="lcard__next">Up next · <b>' + esc(next.title) + '</b>' +
+          (isSong(next) && next.key ? '<span class="kmini">' + esc(next.key) + '</span>' : '') +
+          (isSong(next) && next.bpm ? ' · ' + esc(next.bpm) + ' bpm' : '') +
+          '</div>';
+      }
+
+      li.innerHTML = head + body + extras +
         (it.roles && it.roles.length ? '<div class="lcard__roles">' + roleChips(it.roles) + '</div>' : '') +
         (canClick
           ? '<div class="lcard__tools">' +
@@ -901,6 +1330,15 @@
 
       host.appendChild(li);
     });
+
+    // The per-item timer measures from when this item BECAME current, not from
+    // when the view last rendered — otherwise every re-render (ticking the
+    // metronome on, say) would reset it to zero mid-song.
+    if (state.liveIdx !== nowIdx) {
+      state.liveIdx = nowIdx;
+      state.liveStartedAt = Date.now();
+    }
+    tickClock();
 
     var now = host.querySelector('.lcard--now');
     if (now) now.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -1009,6 +1447,68 @@
      SHEET / PDF
      ============================================================ */
   $('btnSheet').addEventListener('click', function () { renderSheet(); navTo('sheet'); });
+
+  /* Share the running order as plain text.
+     A PDF is the right artefact for a music stand and the wrong one for the
+     group chat the night before, where half the team will open it on a phone
+     with no storage left and a data bundle they are rationing. This is the
+     version that actually gets read. Native share sheet where there is one,
+     clipboard everywhere else. */
+  $('btnShare').addEventListener('click', function () {
+    var set = state.set;
+    if (!set || !(set.items || []).length) {
+      UI.toast('Nothing to share yet', 'warn');
+      return;
+    }
+
+    var text = Insights.shareText(set, { dateLabel: fmtDate(set.date) });
+    haptic(HAPTIC.tap);
+
+    var share = (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Share) || null;
+    if (share) {
+      share.share({ title: set.service || 'Sunday service', text: text })
+        .catch(function () { copyText(text); });
+      return;
+    }
+
+    if (navigator.share) {
+      navigator.share({ title: set.service || 'Sunday service', text: text })
+        .catch(function () { /* the user dismissed the sheet — not an error */ });
+      return;
+    }
+
+    copyText(text);
+  });
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text)
+        .then(function () { UI.toast('Setlist copied'); })
+        .catch(function () { copyFallback(text); });
+      return;
+    }
+    copyFallback(text);
+  }
+
+  /* execCommand('copy') is deprecated but it is still the only thing that
+     works in a WebView without a secure-context clipboard permission, which
+     is exactly where this app runs. */
+  function copyFallback(text) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      UI.toast('Setlist copied');
+    } catch (e) {
+      UI.toast('Could not copy on this device', 'warn');
+    }
+  }
   $('btnSheetBack').addEventListener('click', goUp);
   $('btnPrint').addEventListener('click', function () { window.print(); });
 

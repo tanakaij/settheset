@@ -253,6 +253,73 @@ for (const name of Object.keys(deps)) {
 check('the OCR plugin is looked up by its registered name',
   appJs.includes('p.CapacitorOcr'));
 
+console.log('\n— derived numbers —');
+/* The insights module is loaded by index.html and precached like every other
+   script. It has no build step, so the only thing standing between "added a
+   file" and "the APK ships without it" is this check. */
+check('insights module exists', fs.existsSync(path.join(ROOT, 'js/insights.js')));
+check('insights.js is loaded by index.html', html.includes('js/insights.js'));
+check('insights.js is precached', sw.includes("'js/insights.js'"));
+const insightsJs = read('js/insights.js');
+check('usage is derived, not stored', insightsJs.includes('function usageIndex'));
+check('future services are excluded from usage', insightsJs.includes('set.date > today'));
+check('songs match on id or normalised title',
+  insightsJs.includes('byId') && insightsJs.includes('byTitle'));
+check('service health exists', insightsJs.includes('function serviceHealth'));
+check('drift needs a start time', /drift[\s\S]{0,200}!set\.startTime/.test(insightsJs));
+check('a plain-text setlist can be produced', insightsJs.includes('function shareText'));
+
+console.log('\n— the home screen leads with the next service —');
+check('a hero host exists', html.includes('id="heroHost"'));
+check('the hero is rendered from data', appJs.includes('function renderHero'));
+check('services are split into sections', appJs.includes('sechead__title'));
+check('the next service is marked', appJs.includes('card--next'));
+check('there is a countdown', appJs.includes('function countdown'));
+check('the key journey is computed', appJs.includes('function keyRun'));
+check('a loading skeleton is present', html.includes('id="setsSkeleton"'));
+check('the skeleton is hidden once loaded', appJs.includes("$('setsSkeleton')"));
+
+console.log('\n— the library reports rotation —');
+check('filter chips exist', html.includes('id="songFilters"'));
+check('all four filters are present',
+  ['all', 'recent', 'resting', 'new'].every(f => html.includes('data-filter="' + f + '"')));
+check('filters are wired', appJs.includes("$('songFilters')"));
+check('usage is shown per song', appJs.includes('Insights.usageLabel'));
+check('the usage index is invalidated when services change',
+  /loadSets[\s\S]{0,400}state\.usage = null/.test(appJs));
+
+console.log('\n— the editor flags an overrun before Sunday does —');
+check('a health host exists', html.includes('id="healthHost"'));
+check('health is rendered', appJs.includes('function renderHealth'));
+check('a target length can be set', appJs.includes('targetMinutes'));
+check('warnings are collapsed by default', appJs.includes('state.healthOpen'));
+
+console.log('\n— live mode carries a running clock —');
+check('a wall clock exists', html.includes('id="liveClock"'));
+check('a drift chip exists', html.includes('id="liveDrift"'));
+check('the clock ticks on its own timer', appJs.includes('function tickClock'));
+check('it starts with live mode', appJs.includes('startClock()'));
+/* A timer left running in a background tab is a battery bug you never see in
+   testing and always hear about afterwards. */
+check('and is stopped on the way out', appJs.includes('stopClock()'));
+check('leaving live clears the interval', /stopClock[\s\S]{0,200}clearInterval/.test(appJs));
+check('the current item has an elapsed readout', appJs.includes('lcard__elapsed'));
+check('the elapsed timer survives a re-render',
+  /state\.liveIdx !== nowIdx/.test(appJs));
+check('what is coming is previewed', appJs.includes('lcard__next'));
+
+console.log('\n— sharing the list as text —');
+check('a share control exists', html.includes('id="btnShare"'));
+check('it is wired', appJs.includes("$('btnShare')"));
+check('native share is preferred where present', appJs.includes('navigator.share'));
+check('clipboard is the fallback', appJs.includes('navigator.clipboard'));
+check('and execCommand backs that up', appJs.includes('execCommand'));
+
+console.log('\n— toasts distinguish outcomes —');
+check('toast takes a kind', read('js/ui.js').includes('function toast(text, kind)'));
+check('warn and info variants are styled',
+  cssText.includes('.toast--warn') && cssText.includes('.toast--info'));
+
 console.log('\n— android launcher assets —');
 const densities = ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi'];
 for (const d of densities) {

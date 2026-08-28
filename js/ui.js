@@ -215,12 +215,17 @@
   });
 
   var toastTimer = null;
-  function toast(text) {
+
+  /* One mint pill for "Deleted", "Saved" and "Could not copy" flattened three
+     different outcomes into one. `kind` is optional and defaults to the
+     original look, so every existing call site is unchanged. */
+  function toast(text, kind) {
     var t = el('toast');
     t.textContent = text;
+    t.className = 'toast' + (kind ? ' toast--' + kind : '');
     t.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { t.hidden = true; }, 2600);
+    toastTimer = setTimeout(function () { t.hidden = true; }, kind === 'warn' ? 3400 : 2600);
   }
 
   function confirm(opts) {
